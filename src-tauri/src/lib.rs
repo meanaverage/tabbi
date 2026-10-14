@@ -74,6 +74,7 @@ pub fn run() {
             window::window_set_opacity,
             window::window_set_dark_mode,
             window::window_set_docked,
+            window::window_frame_rate,
             windows::window_new,
             hotkey::global_hotkey_set,
             dock_menu::dock_menu_set,

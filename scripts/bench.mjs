@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Measures the built app's terminal (out/tabbi.app) as a background test instance: how long a flood of output takes
-// to get through (`seq`, about 15 MB), and how long a typed character takes to come back (the shell's echo), as seen
-// by the terminal (xterm's parser), not the screen. Run it when nothing else keeps the Mac busy.
+// to get through (`seq`, about 15 MB), and how long a typed character takes to come back (the shell's echo): until
+// the terminal (xterm's parser) has it, and until the page draws the frame that shows it. Run it when nothing else
+// keeps the Mac busy.
 //   node scripts/bench.mjs [rounds] [path to another tabbi.app to measure]
 import * as fs from 'node:fs'
 import * as net from 'node:net'
@@ -76,7 +77,7 @@ try {
             }),
         }
         return true`)
-    const results = { flood: [], echo: [] }
+    const results = { flood: [], echo: [], drawn: [] }
     for (let round = 0; round < rounds; round++) {
         // (the typed command reads flood-don''e-N, so only the output matches the marker)
         results.flood.push(await evaluate(`
@@ -89,34 +90,42 @@ try {
             return ms`))
     }
     for (let round = 0; round < rounds; round++) {
-        // One character typed, until the shell's echo of it is parsed; a different letter each time.
-        results.echo.push(...await evaluate(`
+        // One character typed, until the shell's echo of it is parsed, and until the frame that draws it (the next
+        // animation frame: xterm draws in one asked for while parsing); a different letter each time.
+        const { echo, drawn } = await evaluate(`
             const { t, xterm, sleep } = window.bench
-            const times = []
+            const echo = [], drawn = []
             for (let i = 0; i < 40; i++) {
                 const before = xterm.buffer.active.cursorX
                 const parsed = new Promise(resolve => {
                     const l = xterm.onWriteParsed(() => {
                         if (xterm.buffer.active.cursorX !== before) {
                             l.dispose()
-                            resolve(performance.now())
+                            const at = performance.now()
+                            requestAnimationFrame(() => resolve([at, performance.now()]))
                         }
                     })
                 })
                 const start = performance.now()
                 t.sendInput(String.fromCharCode(97 + (i % 26)))
-                times.push((await parsed) - start)
+                const [at, frame] = await parsed
+                echo.push(at - start)
+                drawn.push(frame - start)
                 await sleep(30)
             }
             t.sendInput('\\x15')
             await sleep(300)
-            return times`))
+            return { echo, drawn }`)
+        results.echo.push(...echo)
+        results.drawn.push(...drawn)
     }
     console.log(`flood (seq 1 2000000, ~15 MB): median ${median(results.flood).toFixed(0)} ms  [${results.flood.map(v => v.toFixed(0)).join(', ')}]`)
-    const sorted = [...results.echo].sort((a, b) => a - b)
-    // (the page's clock counts whole milliseconds; over many keys the mean still shows smaller differences)
-    const mean = results.echo.reduce((a, b) => a + b, 0) / results.echo.length
-    console.log(`echo (${results.echo.length} keys): mean ${mean.toFixed(2)} ms, median ${median(results.echo).toFixed(0)} ms, 90th percentile ${sorted[Math.floor(sorted.length * 0.9)].toFixed(0)} ms`)
+    for (const [name, values] of [['echo parsed', results.echo], ['echo drawn', results.drawn]]) {
+        const sorted = [...values].sort((a, b) => a - b)
+        // (the page's clock counts whole milliseconds; over many keys the mean still shows smaller differences)
+        const mean = values.reduce((a, b) => a + b, 0) / values.length
+        console.log(`${name} (${values.length} keys): mean ${mean.toFixed(2)} ms, median ${median(values).toFixed(0)} ms, 90th percentile ${sorted[Math.floor(sorted.length * 0.9)].toFixed(0)} ms`)
+    }
 } catch (error) {
     console.log(`FAIL ${error.message.split('\n')[0]}`)
     process.exitCode = 1

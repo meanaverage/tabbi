@@ -320,6 +320,14 @@ const checks = [
         await invoke('window_set_opacity', { opacity: 1 })
         await invoke('window_set_dark_mode', { mode: 'auto' })
         return true`],
+    ["The page draws at the screen's full frame rate, not WebKit's usual 60 fps", `
+        const { invoke } = window.require('@tauri-apps/api/core')
+        const rate = await invoke('window_frame_rate')
+        const times = await new Promise(resolve => { const t = []; const frame = n => { t.push(n); t.length < 121 ? requestAnimationFrame(frame) : resolve(t) }; requestAnimationFrame(frame) })
+        const gaps = times.slice(1).map((n, i) => n - times[i]).sort((a, b) => a - b)
+        const fps = Math.round(1000 / gaps[gaps.length >> 1])
+        if (rate.limited !== false || (rate.screen > 60 && fps < rate.screen * 0.8)) throw new Error(JSON.stringify({ ...rate, fps }))
+        return true`],
     ['Export to file saves the terminal as text, scrollback included', `
         const t = await open()
         await run(t, 'seq 1 300 | sed s/^/line-/; echo export-$((6*7))', 'export-42')
@@ -377,12 +385,13 @@ try {
         const shared = await evaluate(prelude + `return until(() => window.tabby.get(core.ConfigService).store.terminal.fontSize === 19)`, label)
         const ran = await evaluate(prelude + `const t = await open(); return run(t, 'echo window-$((6*7))', 'window-42')`, label)
         const dockItem = await evaluate(`const { invoke } = window.require('@tauri-apps/api/core'); return (await invoke('dock_menu_state')).items.some(i => i.id === 'new-window')`)
+        const fullRate = await evaluate(`return (await window.require('@tauri-apps/api/core').invoke('window_frame_rate')).limited === false`, label)
         await evaluate(`window.require('@tauri-apps/api/window').getCurrentWindow().destroy(); return true`, label).catch(() => null)
         await sleep(500)
         const mainAlive = await evaluate('return !!window.tabby')
-        second = up && bootstrap[0] === false && bootstrap[1] > 1 && shared && ran && dockItem && mainAlive
+        second = up && bootstrap[0] === false && bootstrap[1] > 1 && shared && ran && dockItem && fullRate && mainAlive
         if (!second) {
-            console.log(`     (${JSON.stringify({ label, up, bootstrap, shared, ran, dockItem, mainAlive })})`)
+            console.log(`     (${JSON.stringify({ label, up, bootstrap, shared, ran, dockItem, fullRate, mainAlive })})`)
         }
     } catch (error) {
         console.log(`     (${error.message.split('\n')[0]})`)

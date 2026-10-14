@@ -22,6 +22,7 @@ pub fn build(app: &AppHandle, label: &str) -> Result<tauri::WebviewWindow, Strin
         None => builder,
     };
     let window = builder.build().map_err(|e| e.to_string())?;
+    crate::window::full_frame_rate(&window);
     if background {
         crate::debug::keep_behind(&window);
     }
