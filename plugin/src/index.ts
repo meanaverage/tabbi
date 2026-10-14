@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow, ProgressBarStatus } from '@tauri-apps/api/window'
 import { AppService, ConfigProvider, ConfigService, DockingService, FileProvider, HostAppService, HostWindowService, HotkeyProvider, LogService, Platform, PlatformService, Theme, ThemesService, UpdaterService } from 'tabby-core'
 import { TerminalContextMenuItemProvider, TerminalDecorator } from 'tabby-terminal'
-import { auditTime } from 'rxjs'
+import { auditTime, debounceTime } from 'rxjs'
 
 import { TauriPlatformService } from './platform'
 import { ConsoleLogService } from './services/log.service'
@@ -90,6 +90,10 @@ export default class TauriModule {
             this.registerGlobalHotkey()
         })
         getCurrentWindow().listen('host:toggle-window', () => zone.run(() => docking.toggleWindow()))
+
+        // WebKit collects garbage only under allocation pressure, so closed tabs' terminals (their scrollback) would stay
+        // in memory for a long while: ask it to once tabs stop closing (src-tauri/src/window.rs).
+        app.tabClosed$.pipe(debounceTime(2000)).subscribe(() => invoke('webview_collect_garbage'))
 
         // A tab's progress (a transfer, a long command reporting it) on the Dock icon.
         let lastProgress: number|null = null

@@ -97,7 +97,9 @@ const prelude = `
     const sleep = ms => new Promise(r => setTimeout(r, ms))
     const until = async (f, ms = 10000) => { for (let t = 0; t < ms; t += 100) { const v = await f(); if (v) return v; await sleep(100) } throw new Error('timed out: ' + f) }
     const screen = t => { const b = t.frontend.xterm.buffer.active, out = []; for (let i = 0; i < b.length; i++) { const l = b.getLine(i)?.translateToString(true); if (l && l.trim()) out.push(l) } return out.join('\\n') }
-    const open = async cwd => { const t = await window.tabby.get(local.TerminalService).openTab(null, cwd ?? null); return ready(t) }
+    // (in Angular's zone, as a click would: outside it, a new tab may wait for something else to update the page)
+    const zone = window.tabby.get(window.require('@angular/core').NgZone)
+    const open = async cwd => { const t = await zone.run(() => window.tabby.get(local.TerminalService).openTab(null, cwd ?? null)); return ready(t) }
     const ready = t => until(() => t.frontend?.xterm && t.session?.open && t)
     const fs_exists = p => window.require('fs').existsSync(p)
     const holder = t => app.tabs.find(x => x === t || x.getAllTabs?.().includes(t))
@@ -339,6 +341,28 @@ const checks = [
         const text = await window.require('fs').promises.readFile(file, 'utf-8')
         return items[0].label === 'Export to file' && text.includes('line-1\\n') && text.includes('line-300') && text.includes('export-42')`],
     ['Settings open', `app.openNewTabRaw({ type: window.require('tabby-settings').SettingsTabComponent }); return until(() => app.activeTab?.constructor?.name === 'SettingsTabComponent')`],
+    ['Every Settings page opens without errors', `
+        // (Tabby's own Config sync page asks for the synced configs even with no sync server set, and fails:
+        // configSyncSettingsTab.component.ts, ngOnInit)
+        const tabbysOwn = /configSync\.host\.endsWith/
+        const errors = [], consoleError = console.error
+        console.error = (...args) => {
+            const text = args.map(String).join(' ')
+            if (!tabbysOwn.test(text)) errors.push(text.slice(0, 200))
+            consoleError(...args)
+        }
+        try {
+            app.openNewTabRaw({ type: window.require('tabby-settings').SettingsTabComponent })
+            const links = await until(() => { const l = [...document.querySelectorAll('.nav-pills .nav-link')]; return l.length > 5 && l })
+            for (const link of links) {
+                link.click()
+                await sleep(300)
+            }
+            if (errors.length) throw new Error(errors.join(' | '))
+            return links.length
+        } finally {
+            console.error = consoleError
+        }`],
     ['Settings are saved', `const config = window.tabby.get(core.ConfigService); config.store.terminal.fontSize = 17; await config.save(); return true`],
 ]
 
@@ -398,6 +422,37 @@ try {
     }
     console.log(`${second ? 'ok  ' : 'FAIL'} New Window opens a second window that shares the settings, and closes again`)
     failed += second ? 0 : 1
+
+    // Closing tabs gives their memory back: WebKit is asked to collect garbage once tabs stop closing.
+    let freed = false
+    try {
+        const pid = await evaluate(`return window.require('@tauri-apps/api/core').invoke('webview_process_id')`)
+        const footprint = () => {
+            const m = /Footprint: ([\d.]+) (KB|MB|GB)/.exec(execFileSync('footprint', [String(pid)], { encoding: 'utf-8' }))
+            return Math.round(Number(m[1]) * { KB: 1 / 1024, MB: 1, GB: 1024 }[m[2]])
+        }
+        const before = footprint()
+        await evaluate(prelude + `
+            window.filled = []
+            for (let i = 0; i < 6; i++) {
+                const t = await open()
+                await run(t, "seq 1 30000 | sed 's/^/scrollback line /'; echo fill-don''e-" + i, 'fill-done-' + i)
+                window.filled.push(t)
+            }
+            return true`)
+        const full = footprint()
+        await evaluate(prelude + `for (const t of window.filled) await app.closeTab(holder(t), false); window.filled = null; return true`)
+        await sleep(5000)
+        const closed = footprint()
+        freed = full - before > 150 && closed - before < (full - before) / 2
+        if (!freed) {
+            console.log(`     (${before} MB, ${full} MB with six full tabs, ${closed} MB 5 s after closing them)`)
+        }
+    } catch (error) {
+        console.log(`     (${error.message.split('\n')[0]})`)
+    }
+    console.log(`${freed ? 'ok  ' : 'FAIL'} Closing tabs gives their memory back`)
+    failed += freed ? 0 : 1
 
     // Reloading the page keeps the terminals: the new page takes over their shells (Tabby's tab recovery).
     let reloaded = false

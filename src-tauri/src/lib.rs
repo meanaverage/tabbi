@@ -75,6 +75,8 @@ pub fn run() {
             window::window_set_dark_mode,
             window::window_set_docked,
             window::window_frame_rate,
+            window::webview_collect_garbage,
+            window::webview_process_id,
             windows::window_new,
             hotkey::global_hotkey_set,
             dock_menu::dock_menu_set,

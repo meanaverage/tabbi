@@ -145,6 +145,52 @@ pub async fn window_frame_rate(window: WebviewWindow) -> Result<FrameRate, Strin
     }
 }
 
+/// Asks WebKit to collect garbage now. It otherwise waits for allocation pressure, so a closed tab's terminal (its
+/// scrollback, its WebGL textures) can stay in memory for a long while. Private WebKit API (nothing happens where it's
+/// missing).
+#[tauri::command]
+pub fn webview_collect_garbage(window: WebviewWindow) {
+    #[cfg(target_os = "macos")]
+    let _ = window.with_webview(|webview| unsafe {
+        use objc2::msg_send;
+        use objc2::runtime::AnyObject;
+        let view = webview.inner() as *mut AnyObject;
+        let config: *mut AnyObject = msg_send![view, configuration];
+        let pool: *mut AnyObject = msg_send![config, processPool];
+        let gc = objc2::sel!(_garbageCollectJavaScriptObjectsForTesting);
+        let available: bool = msg_send![pool, respondsToSelector: gc];
+        if available {
+            let _: () = msg_send![pool, _garbageCollectJavaScriptObjectsForTesting];
+        }
+    });
+    #[cfg(not(target_os = "macos"))]
+    let _ = window;
+}
+
+/// For measurements: the process WebKit renders this window's page in (0 where that can't be told).
+#[tauri::command]
+pub async fn webview_process_id(window: WebviewWindow) -> Result<i32, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let (tx, rx) = std::sync::mpsc::channel();
+        window
+            .with_webview(move |webview| unsafe {
+                use objc2::msg_send;
+                use objc2::runtime::AnyObject;
+                let view = webview.inner() as *mut AnyObject;
+                let available: bool = msg_send![view, respondsToSelector: objc2::sel!(_webProcessIdentifier)];
+                let _ = tx.send(if available { msg_send![view, _webProcessIdentifier] } else { 0 });
+            })
+            .map_err(|e| e.to_string())?;
+        rx.recv_timeout(std::time::Duration::from_secs(5)).map_err(|e| e.to_string())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = window;
+        Ok(0)
+    }
+}
+
 #[cfg(target_os = "macos")]
 mod webkit {
     use objc2::runtime::AnyObject;

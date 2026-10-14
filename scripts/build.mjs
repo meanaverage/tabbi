@@ -114,11 +114,36 @@ const requireFromWork = createRequire(path.join(work, 'package.json'))
 const webpack = requireFromWork('webpack')
 async function build (configPath) {
     const config = (await import(url.pathToFileURL(configPath).href)).default()
+    if (!process.env.TABBY_DEV) {
+        lighten(config)
+    }
     const stats = await promisify(webpack)(config)
     if (stats.hasErrors()) {
         console.error(stats.toString({ colors: true, all: false, errors: true, warnings: false }))
         process.exit(1)
     }
+}
+/** A lighter page than Tabby's own builds (their configs are only changed here, in memory): scripts minified (class
+ * names kept: some code reads them), no CSS source maps (css-loader would put them, with the SCSS sources, into the
+ * styles the scripts carry), and Angular's development checks left out. TABBY_DEV=1 builds as Tabby does. */
+function lighten (config) {
+    config.optimization = {
+        ...config.optimization,
+        minimize: true,
+        minimizeOptions: { javascript: { keep_classnames: true, compress: { passes: 1 } } },
+    }
+    for (const rule of config.module?.rules ?? []) {
+        if (Array.isArray(rule.use)) {
+            rule.use = rule.use.map(use => {
+                const loader = typeof use === 'string' ? use : use.loader
+                if (!['css-loader', 'sass-loader'].includes(loader)) {
+                    return use
+                }
+                return { ...typeof use === 'string' ? {} : use, loader, options: { ...use.options, sourceMap: false } }
+            })
+        }
+    }
+    config.plugins = [...config.plugins ?? [], new webpack.DefinePlugin({ ngDevMode: false })]
 }
 for (const name of PLUGINS) {
     console.log(name)
