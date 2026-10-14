@@ -273,6 +273,16 @@ const checks = [
         await invoke('window_set_opacity', { opacity: 1 })
         await invoke('window_set_dark_mode', { mode: 'auto' })
         return true`],
+    ['Export to file saves the terminal as text, scrollback included', `
+        const t = await open()
+        await run(t, 'seq 1 300 | sed s/^/line-/; echo export-$((6*7))', 'export-42')
+        const menu = window.tabby.get(window.require('tabby-terminal').TerminalContextMenuItemProvider)
+            .find(p => p.constructor.name === 'ExportTerminalContextMenu')
+        const items = await menu.getItems(t)
+        const file = ${JSON.stringify(path.join(dataDir, 'export.txt'))}
+        await menu.exportTo(t, file)
+        const text = await window.require('fs').promises.readFile(file, 'utf-8')
+        return items[0].label === 'Export to file' && text.includes('line-1\\n') && text.includes('line-300') && text.includes('export-42')`],
     ['Settings open', `app.openNewTabRaw({ type: window.require('tabby-settings').SettingsTabComponent }); return until(() => app.activeTab?.constructor?.name === 'SettingsTabComponent')`],
     ['Settings are saved', `const config = window.tabby.get(core.ConfigService); config.store.terminal.fontSize = 17; await config.save(); return true`],
 ]
