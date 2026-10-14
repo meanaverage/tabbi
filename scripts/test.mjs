@@ -12,7 +12,8 @@ import * as url from 'node:url'
 import { execFileSync, spawn } from 'node:child_process'
 
 const root = path.resolve(url.fileURLToPath(new URL('.', import.meta.url)), '..')
-const exe = path.join(root, 'out/tabbi.app/Contents/MacOS/tabbi')
+// (TABBI_APP: another built tabbi.app to check instead)
+const exe = path.join(process.env.TABBI_APP ?? path.join(root, 'out/tabbi.app'), 'Contents/MacOS/tabbi')
 const port = 9500 + Math.floor(Math.random() * 400)
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tabbi-test-'))
 const log = path.join(dataDir, 'app.log')
@@ -143,6 +144,29 @@ const checks = [
         const numbers = [...text.matchAll(/(\\d+) é字🎉/g)].map(m => Number(m[1]))
         const whole = numbers.length === 100000 && numbers.every((n, i) => n === i + 1)
         if (!(whole && !text.includes('\\ufffd'))) throw new Error(JSON.stringify({ lines: numbers.length, broken: text.split('\\ufffd').length - 1 }))
+        return true`],
+    ["A typed key's reply is drawn at once, not at the next animation frame", `
+        const t = await open(), xterm = t.frontend.xterm, buffer = xterm._core._writeBuffer
+        xterm.options.cursorBlink = false
+        await sleep(500)
+        // Drawn since the reply was handed to xterm, by the time xterm has read it?
+        let drawn = null
+        const write = buffer.write
+        buffer.write = function (...args) { drawn = false; return write.apply(this, args) }
+        const render = xterm.onRender(() => { if (drawn === false) drawn = true })
+        const results = []
+        for (let i = 0; i < 5; i++) {
+            const parsed = new Promise(resolve => { const p = xterm.onWriteParsed(() => { p.dispose(); resolve(drawn) }) })
+            const key = new KeyboardEvent('keydown', { key: 'x', code: 'KeyX', keyCode: 88, which: 88, bubbles: true, cancelable: true })
+            xterm.textarea.dispatchEvent(key)
+            if (!key.defaultPrevented) xterm.textarea.dispatchEvent(new KeyboardEvent('keypress', { key: 'x', code: 'KeyX', keyCode: 120, charCode: 120, which: 120, bubbles: true, cancelable: true }))
+            results.push(await parsed)
+            await sleep(100)
+        }
+        render.dispose()
+        buffer.write = write
+        t.sendInput('\\x15')
+        if (results.filter(Boolean).length < 4) throw new Error(JSON.stringify(results))
         return true`],
     ['A terminal opens in the folder asked for', `const t = await open('/private/tmp'); return run(t, 'pwd', '/private/tmp')`],
     ['A folder that does not exist is ignored', `const t = await open('/no/such/folder'); return run(t, 'echo started', 'started')`],

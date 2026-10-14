@@ -20,6 +20,7 @@ import { POSIXShellsProvider } from './shells/posix'
 import { TauriConfigProvider } from './config'
 import { TauriHotkeyProvider } from './hotkeys'
 import { PathDropDecorator } from './pathDrop'
+import { EchoNowDecorator } from './echoNow'
 import { ExportTerminalContextMenu } from './terminalContextMenu'
 import { TauriDockingService } from './services/docking.service'
 import { DockMenuService } from './services/dockMenu.service'
@@ -43,6 +44,7 @@ import './styles.scss'
         { provide: ConfigProvider, useClass: TauriConfigProvider, multi: true },
         { provide: HotkeyProvider, useClass: TauriHotkeyProvider, multi: true },
         { provide: TerminalDecorator, useClass: PathDropDecorator, multi: true },
+        { provide: TerminalDecorator, useClass: EchoNowDecorator, multi: true },
         { provide: TerminalContextMenuItemProvider, useClass: ExportTerminalContextMenu, multi: true },
         { provide: ShellProvider, useClass: MacOSDefaultShellProvider, multi: true },
         { provide: ShellProvider, useClass: POSIXShellsProvider, multi: true },
