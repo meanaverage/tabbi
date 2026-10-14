@@ -1,31 +1,45 @@
 import { Channel, invoke } from '@tauri-apps/api/core'
 import { ChildProcess, PTYInterface, PTYProxy } from 'tabby-local'
 
-type PtyEvent = { event: 'exit', code: number } | { event: 'close' }
+// Each message from src-tauri/src/pty.rs starts with one of these, then the output, the exit code (u32,
+// little-endian), or nothing.
+const DATA = 1
+const EXIT = 2
+const CLOSE = 3
 
-interface Attachment {
-    data: Channel<ArrayBuffer>
-    events: Channel<PtyEvent>
-}
+type PtyEvent = ['data', Uint8Array] | ['exit', number] | ['close']
 
-function channels (proxy: () => TauriPTYProxy|undefined): Attachment {
-    const data = new Channel<ArrayBuffer>()
-    data.onmessage = buffer => proxy()?.emit('data', new Uint8Array(buffer))
-    const events = new Channel<PtyEvent>()
-    events.onmessage = e => {
-        if (e.event === 'exit') {
-            proxy()?.emit('exit', e.code)
+/** The channel a PTY's output comes on, and a function that hands it to the proxy once there is one: until then
+ * (output can come before the spawn call returns), what comes waits. */
+function outputChannel (): [Channel<ArrayBuffer>, (proxy: TauriPTYProxy) => void] {
+    let target: TauriPTYProxy|undefined
+    const early: PtyEvent[] = []
+    const channel = new Channel<ArrayBuffer>()
+    channel.onmessage = buffer => {
+        const bytes = new Uint8Array(buffer)
+        let event: PtyEvent
+        if (bytes[0] === DATA) {
+            event = ['data', bytes.subarray(1)]
+        } else if (bytes[0] === EXIT) {
+            event = ['exit', new DataView(buffer).getUint32(1, true)]
+        } else if (bytes[0] === CLOSE) {
+            event = ['close']
         } else {
-            proxy()?.emit('close')
+            return
         }
+        target ? target.deliver(event) : early.push(event)
     }
-    return { data, events }
+    return [channel, proxy => {
+        target = proxy
+        for (const event of early.splice(0)) {
+            proxy.deliver(event)
+        }
+    }]
 }
 
 export class TauriPTYInterface extends PTYInterface {
     async spawn (command: string, args: string[], options: any): Promise<PTYProxy> {
-        let proxy: TauriPTYProxy|undefined
-        const { data, events } = channels(() => proxy)
+        const [output, connect] = outputChannel()
         const env: Record<string, string> = {}
         for (const [k, v] of Object.entries(options.env ?? {})) {
             if (v !== undefined && v !== null) {
@@ -39,27 +53,29 @@ export class TauriPTYInterface extends PTYInterface {
             env,
             cols: options.cols ?? 80,
             rows: options.rows ?? 30,
-            data,
-            events,
+            output,
         })
-        proxy = new TauriPTYProxy(id, pid)
+        const proxy = new TauriPTYProxy(id, pid)
+        connect(proxy)
         return proxy
     }
 
     async restore (id: string): Promise<PTYProxy|null> {
-        let proxy: TauriPTYProxy|undefined
-        const { data, events } = channels(() => proxy)
-        const pid = await invoke<number|null>('pty_attach', { id, data, events })
+        const [output, connect] = outputChannel()
+        const pid = await invoke<number|null>('pty_attach', { id, output })
         if (pid === null) {
             return null
         }
-        proxy = new TauriPTYProxy(id, pid)
+        const proxy = new TauriPTYProxy(id, pid)
+        connect(proxy)
         return proxy
     }
 }
 
 export class TauriPTYProxy extends PTYProxy {
     private handlers = new Map<string, ((...args: any[]) => void)[]>()
+    /** What came before anyone subscribed. */
+    private waiting: PtyEvent[]|null = []
     private truePID: Promise<number>
 
     constructor (private id: string, private pid: number) {
@@ -75,6 +91,15 @@ export class TauriPTYProxy extends PTYProxy {
             }
             return pid
         })().catch(() => this.pid)
+    }
+
+    deliver (event: PtyEvent): void {
+        if (this.waiting) {
+            this.waiting.push(event)
+        } else {
+            const [name, ...args] = event
+            this.emit(name, ...args)
+        }
     }
 
     emit (event: string, ...args: any[]): void {
@@ -100,6 +125,14 @@ export class TauriPTYProxy extends PTYProxy {
 
     subscribe (event: string, handler: (..._: any[]) => void): void {
         this.handlers.set(event, [...this.handlers.get(event) ?? [], handler])
+        // Tabby subscribes to data, exit and close one after another: what waited goes out once it has.
+        queueMicrotask(() => {
+            const waiting = this.waiting
+            this.waiting = null
+            for (const [name, ...args] of waiting ?? []) {
+                this.emit(name, ...args)
+            }
+        })
     }
 
     unsubscribeAll (): void {

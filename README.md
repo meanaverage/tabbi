@@ -51,6 +51,8 @@ Tabby keeps everything that depends on Electron in one plugin, `tabby-electron`.
 
 `node scripts/test.mjs` checks a built app end to end: terminals, SSH against a throwaway local server, window dragging, settings. Its test window stays behind your other windows and uses its own settings, clipboard and passwords.
 
+`node scripts/bench.mjs` measures the same way how long a flood of terminal output takes to get through, and how quickly typing echoes back.
+
 ## Credits and license
 
 tabbi isn't affiliated with Tabby or its author. Tabby is by [Eugeny](https://github.com/Eugeny) and MIT licensed. The SSH code in `src-tauri/src/ssh` is derived from Eugeny's [russh-napi](https://github.com/Eugeny/russh-napi) (Apache 2.0, see the license file there).

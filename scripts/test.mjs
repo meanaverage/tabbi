@@ -3,7 +3,7 @@
 // web storage, clipboard and password store; window behind the others, never takes the keyboard), drives Tabby
 // inside it, closes it. SSH goes to a throwaway OpenSSH server on 127.0.0.1 with throwaway keys (macOS's own sshd,
 // run as you), stopped at the end.
-//   node scripts/test.mjs
+//   node scripts/test.mjs [only the checks whose names match this regular expression]
 import * as fs from 'node:fs'
 import * as net from 'node:net'
 import * as os from 'node:os'
@@ -17,6 +17,7 @@ const port = 9500 + Math.floor(Math.random() * 400)
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tabbi-test-'))
 const log = path.join(dataDir, 'app.log')
 const sleep = ms => new Promise(r => setTimeout(r, ms))
+const only = process.argv[2]
 
 // The throwaway SSH server
 const sshDir = path.join(dataDir, 'sshd')
@@ -61,7 +62,9 @@ let app = start()
 async function booted () {
     for (let i = 0; i < 300; i++) {
         await sleep(100)
-        if (fs.existsSync(path.join(currentDir, 'debug-token')) && await evaluate('return !!window.tabby').catch(() => false)) {
+        // (up once Tabby has loaded the settings)
+        const up = `return !!window.tabby?.get(window.require('tabby-core').ConfigService).store?.profiles`
+        if (fs.existsSync(path.join(currentDir, 'debug-token')) && await evaluate(up).catch(() => false)) {
             return true
         }
     }
@@ -99,11 +102,46 @@ const prelude = `
     const fs_exists = p => window.require('fs').existsSync(p)
     const holder = t => app.tabs.find(x => x === t || x.getAllTabs?.().includes(t))
     const run = async (t, command, expect) => { t.sendInput(command + '\\r'); await until(() => screen(t).includes(expect)); return true }
+    // A program on its own PTY, without a tab: what it printed by the time its exit came, and the exit code.
+    const program = async (command, args) => {
+        const pty = await window.tabby.get(local.PTYInterface).spawn(command, args, { env: { PATH: '/usr/bin:/bin', LANG: 'en_US.UTF-8' }, cols: 80, rows: 24 })
+        const decoder = new TextDecoder(); let text = '', exit = null, closed = false
+        pty.subscribe('data', d => { pty.ackData(d.length); text += decoder.decode(d, { stream: true }) })
+        pty.subscribe('exit', code => { exit = { text, code } })
+        pty.subscribe('close', () => { closed = true })
+        await until(() => closed, 30000)
+        return exit ?? { text, code: 'no exit' }
+    }
 `
 
 const checks = [
     ['Tabby starts with every plugin', `return (window.pluginModules ?? []).length === ${JSON.parse(fs.readFileSync(path.join(root, '.build/page/plugins.json'), 'utf-8')).length}`],
     ['A terminal runs a command', `const t = await open(); return run(t, 'echo tt-$((6*7))', 'tt-42')`],
+    ["A quick program's output comes before its exit", `
+        const seen = []
+        for (let i = 0; i < 10; i++) {
+            const { text, code } = await program('/bin/echo', ['quick-' + i])
+            if (!text.includes('quick-' + i) || code !== 0) seen.push({ i, text, code })
+        }
+        if (seen.length) throw new Error(JSON.stringify(seen))
+        return true`],
+    ['Output written right before exiting all comes before the exit', `
+        const { text, code } = await program('/bin/sh', ['-c', 'seq 1 100000; printf tail-end; exit 3'])
+        const numbers = text.split('\\r\\n').slice(0, -1)
+        const whole = numbers.length === 100000 && numbers.every((n, i) => n === String(i + 1))
+        if (!(whole && text.endsWith('tail-end') && code === 3)) throw new Error(JSON.stringify({ lines: numbers.length, end: text.slice(-30), code }))
+        return true`],
+    ['A flood of output arrives whole, its characters never cut in two', `
+        const t = await open()
+        let text = ''
+        const subscription = t.session.output$.subscribe(s => text += s)
+        t.sendInput("seq 1 100000 | sed 's/$/ é字🎉/'; echo utf-$((6*7))\\r")
+        await until(() => text.includes('utf-42'), 60000)
+        subscription.unsubscribe()
+        const numbers = [...text.matchAll(/(\\d+) é字🎉/g)].map(m => Number(m[1]))
+        const whole = numbers.length === 100000 && numbers.every((n, i) => n === i + 1)
+        if (!(whole && !text.includes('\\ufffd'))) throw new Error(JSON.stringify({ lines: numbers.length, broken: text.split('\\ufffd').length - 1 }))
+        return true`],
     ['A terminal opens in the folder asked for', `const t = await open('/private/tmp'); return run(t, 'pwd', '/private/tmp')`],
     ['A folder that does not exist is ignored', `const t = await open('/no/such/folder'); return run(t, 'echo started', 'started')`],
     ['Paste reads the clipboard', `
@@ -116,6 +154,10 @@ const checks = [
         if (!process.kill(pid, 0)) return false
         app.closeTab(holder(t), false)
         return until(() => { try { process.kill(pid, 0); return false } catch (e) { return e.code === 'ESRCH' } })`],
+    ['Typing exit closes the tab, also with a program left running in the background', `
+        const t = await open()
+        t.sendInput('(sleep 20 &); exit\\r')
+        return until(() => !holder(t), 5000)`],
     ['Splitting starts a second shell', `
         const t = await open(); const split = holder(t)
         await split.splitTab(t, 'r')
@@ -298,6 +340,9 @@ try {
         throw new Error('the app did not start')
     }
     for (const [name, code, before] of checks) {
+        if (only && !new RegExp(only, 'i').test(name)) {
+            continue
+        }
         try {
             before?.()
             const ok = await evaluate(prelude + code)
@@ -307,6 +352,9 @@ try {
             console.log(`FAIL ${name}: ${error.message.split('\n')[0]}`)
             failed++
         }
+    }
+    if (only) {
+        throw null
     }
     const saved = fs.readFileSync(path.join(dataDir, 'config.yaml'), 'utf-8').includes('fontSize: 17')
     console.log(`${saved ? 'ok  ' : 'FAIL'} The config file has the change`)
@@ -341,6 +389,32 @@ try {
     }
     console.log(`${second ? 'ok  ' : 'FAIL'} New Window opens a second window that shares the settings, and closes again`)
     failed += second ? 0 : 1
+
+    // Reloading the page keeps the terminals: the new page takes over their shells (Tabby's tab recovery).
+    let reloaded = false
+    try {
+        await evaluate(prelude + `
+            const t = await open()
+            await run(t, 'export TT_RELOAD=kept-$((6*7))', 'TT_RELOAD')
+            for (const tab of app.tabs.filter(x => x !== holder(t))) {
+                await app.closeTab(tab, false)
+            }
+            await window.tabby.get(core.TabRecoveryService).saveTabs(app.tabs)
+            setTimeout(() => location.reload(), 100)
+            return true`)
+        await sleep(1000)
+        if (!await booted()) {
+            throw new Error('the page did not come back')
+        }
+        reloaded = await evaluate(prelude + `
+            const tab = await until(() => app.tabs.find(x => x.getAllTabs))
+            const t = await ready(tab.getAllTabs ? tab.getAllTabs()[0] : tab)
+            return run(t, 'echo $TT_RELOAD', 'kept-42')`)
+    } catch (error) {
+        console.log(`     (${error.message.split('\n')[0]})`)
+    }
+    console.log(`${reloaded ? 'ok  ' : 'FAIL'} A terminal keeps its shell through a page reload`)
+    failed += reloaded ? 0 : 1
 
     // Quit goes through Tabby's close flow and the app exits; started again, the window has the size it was quit at.
     let restored = false
@@ -402,8 +476,10 @@ try {
         failed += ok ? 0 : 1
     }
 } catch (error) {
-    console.log(`FAIL ${error.message}`)
-    failed++
+    if (error !== null) {
+        console.log(`FAIL ${error.message}`)
+        failed++
+    }
 } finally {
     app.kill('SIGKILL')
     sshd.kill('SIGKILL')
