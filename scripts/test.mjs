@@ -47,16 +47,21 @@ const sshd = spawn('/usr/sbin/sshd', ['-D', '-e', '-f', path.join(sshDir, 'sshd_
     stdio: ['ignore', 'ignore', fs.openSync(path.join(sshDir, 'sshd.log'), 'a')],
 })
 
-const start = () => spawn(exe, [], {
-    env: { ...process.env, TABBI_DEBUG_PORT: String(port), TABBI_DATA_DIR: dataDir, SSH_AUTH_SOCK: agentSocket },
-    stdio: ['ignore', fs.openSync(log, 'a'), fs.openSync(log, 'a')],
-})
+// The data folder of the app that's running (a check further down starts copies with fresh ones).
+let currentDir = dataDir
+const start = (dir = dataDir, env = {}) => {
+    currentDir = dir
+    return spawn(exe, [], {
+        env: { ...process.env, TABBI_DEBUG_PORT: String(port), TABBI_DATA_DIR: dir, SSH_AUTH_SOCK: agentSocket, ...env },
+        stdio: ['ignore', fs.openSync(log, 'a'), fs.openSync(log, 'a')],
+    })
+}
 let app = start()
 
 async function booted () {
     for (let i = 0; i < 300; i++) {
         await sleep(100)
-        if (fs.existsSync(path.join(dataDir, 'debug-token')) && await evaluate('return !!window.tabby').catch(() => false)) {
+        if (fs.existsSync(path.join(currentDir, 'debug-token')) && await evaluate('return !!window.tabby').catch(() => false)) {
             return true
         }
     }
@@ -65,7 +70,7 @@ async function booted () {
 
 /** Runs code in a window of the app (the first one unless a label is given) and resolves with its result. */
 function evaluate (code, window = 'main') {
-    const token = fs.readFileSync(path.join(dataDir, 'debug-token'), 'utf-8').trim()
+    const token = fs.readFileSync(path.join(currentDir, 'debug-token'), 'utf-8').trim()
     const request = window === 'main' ? code : { window, code }
     return new Promise((resolve, reject) => {
         const socket = net.connect(port, '127.0.0.1', () => socket.write(`${token}\n${JSON.stringify(request)}\n`))
@@ -366,6 +371,36 @@ try {
     }
     console.log(`${restored ? 'ok  ' : 'FAIL'} Quit closes the app through Tabby, and it reopens at the size it was quit at`)
     failed += restored ? 0 : 1
+
+    // First launch with Tabby installed (a fake Tabby folder here): "Import from Tabby" starts from a copy of its
+    // settings, "Start fresh" from Tabby's defaults; Tabby's file stays as it was.
+    const tabbyDir = path.join(dataDir, 'fake-tabby')
+    fs.mkdirSync(tabbyDir)
+    const tabbySettings = 'version: 1\nterminal:\n  fontSize: 23\n'
+    fs.writeFileSync(path.join(tabbyDir, 'config.yaml'), tabbySettings)
+    for (const answer of ['import', 'fresh']) {
+        let ok = false
+        try {
+            app.kill('SIGKILL')
+            await sleep(500)
+            const dir = path.join(dataDir, `first-launch-${answer}`)
+            fs.mkdirSync(dir)
+            app = start(dir, { TABBI_IMPORT_FROM: tabbyDir, TABBI_IMPORT_ANSWER: answer })
+            if (!await booted()) {
+                throw new Error('the app did not start')
+            }
+            const fontSize = await evaluate(prelude + `const config = window.tabby.get(core.ConfigService); await until(() => config.store?.terminal); return config.store.terminal.fontSize`)
+            ok = (answer === 'import' ? fontSize === 23 : fontSize !== 23) && fs.existsSync(path.join(dir, 'config.yaml'))
+                && fs.readFileSync(path.join(tabbyDir, 'config.yaml'), 'utf-8') === tabbySettings
+            if (!ok) {
+                console.log(`     (font size ${fontSize})`)
+            }
+        } catch (error) {
+            console.log(`     (${error.message.split('\n')[0]})`)
+        }
+        console.log(`${ok ? 'ok  ' : 'FAIL'} First launch, ${answer === 'import' ? '"Import from Tabby": starts from Tabby\'s settings' : '"Start fresh": starts from the defaults'}, Tabby's file unchanged`)
+        failed += ok ? 0 : 1
+    }
 } catch (error) {
     console.log(`FAIL ${error.message}`)
     failed++
@@ -376,8 +411,7 @@ try {
     fs.rmSync(agentSocket, { force: true })
 }
 // The test's own web storage (see debug::web_store in src-tauri/src/debug.rs)
-const store = /web storage ([0-9A-F-]{36})/.exec(fs.readFileSync(log, 'utf-8'))?.[1]
-if (store) {
+for (const [, store] of fs.readFileSync(log, 'utf-8').matchAll(/web storage ([0-9A-F-]{36})/g)) {
     fs.rmSync(path.join(os.homedir(), 'Library/WebKit/io.github.meanaverage.tabbi/WebsiteDataStore', store.toLowerCase()), { recursive: true, force: true })
 }
 const pageErrors = fs.readFileSync(log, 'utf-8').split('\n').filter(l => /^page (error|uncaught|unhandled)/.test(l))

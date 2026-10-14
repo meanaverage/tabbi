@@ -43,6 +43,8 @@ async function start (): Promise<void> {
         enableProdMode()
     }
 
+    // The first launch asks whether to start from Tabby's settings (src-tauri/src/config.rs).
+    await invoke('config_first_launch')
     let config = {}
     try {
         config = yaml.load(await invoke<string>('config_read')) as any ?? {}

@@ -84,6 +84,7 @@ pub fn run() {
             clipboard::clipboard_read,
             clipboard::clipboard_write,
             config::config_read,
+            config::config_first_launch,
             config::config_write,
             debug::debug_reply,
             debug::console_log,

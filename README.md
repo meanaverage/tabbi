@@ -24,7 +24,7 @@ open out/tabbi.app
 
 Move `out/tabbi.app` to Applications to keep it. The first build downloads Tabby's packages and compiles the app, so it takes a while and needs about 10 GB of free disk space. To update, pull both repos and run `./build ../tabby` again.
 
-On first launch tabbi starts from a copy of your Tabby settings, if you have Tabby installed. Tabby's own settings aren't changed.
+On first launch, if you have Tabby installed, tabbi asks whether to bring your Tabby settings over. Tabby's own settings aren't changed.
 
 ## What works
 
