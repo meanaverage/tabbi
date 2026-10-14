@@ -1,5 +1,6 @@
 //! For testing. With `TABBI_DEBUG_PORT` set, the app runs JavaScript sent to 127.0.0.1:<port> in its page and
-//! sends back the result: first line the token from `<data dir>/debug-token`, then one JSON string of code per line.
+//! sends back the result: first line the token from `<data dir>/debug-token`, then one request per line, a JSON
+//! string of code for the main window, or `{"window": label, "code": …}` for another one.
 //!
 //! Such a test instance stays in the background: no Dock icon, its window behind the others, and it never takes the
 //! keyboard (the person using the Mac keeps typing elsewhere). `TABBI_FOREGROUND=1` brings it forward.
@@ -120,8 +121,12 @@ pub fn start(app: &AppHandle) {
                     _ => return,
                 }
                 while let Ok(Some(line)) = lines.next_line().await {
-                    let reply = match serde_json::from_str::<String>(&line) {
-                        Ok(code) => run(&app, code).await,
+                    let reply = match serde_json::from_str::<serde_json::Value>(&line) {
+                        Ok(serde_json::Value::String(code)) => run(&app, "main", code).await,
+                        Ok(request) => match (request["window"].as_str(), request["code"].as_str()) {
+                            (Some(label), Some(code)) => run(&app, label, code.to_string()).await,
+                            _ => serde_json::json!({ "error": "bad request: expected code, or a window and code" }),
+                        },
                         Err(e) => serde_json::json!({ "error": format!("bad request: {e}") }),
                     };
                     let mut out = reply.to_string();
@@ -135,9 +140,9 @@ pub fn start(app: &AppHandle) {
     });
 }
 
-async fn run(app: &AppHandle, code: String) -> serde_json::Value {
-    let Some(window) = app.get_webview_window("main") else {
-        return serde_json::json!({ "error": "no window" });
+async fn run(app: &AppHandle, label: &str, code: String) -> serde_json::Value {
+    let Some(window) = app.get_webview_window(label) else {
+        return serde_json::json!({ "error": format!("no window {label}") });
     };
     let state = app.state::<DebugState>();
     let id = state.next.fetch_add(1, Ordering::Relaxed);

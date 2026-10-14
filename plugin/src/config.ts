@@ -6,6 +6,7 @@ export class TauriConfigProvider extends ConfigProvider {
         [Platform.macOS]: {
             hotkeys: {
                 'toggle-window': ['Ctrl-Space'],
+                'new-window': ['⌘-N'],
             },
         },
     }

@@ -13,6 +13,7 @@ import '../../app/src/toastr.scss'
 import { enableProdMode } from '@angular/core'
 import { platformBrowserDynamic } from '@angular/platform-browser-dynamic'
 import { invoke } from '@tauri-apps/api/core'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import * as yaml from 'js-yaml'
 
 import { getRootModule } from '../../app/src/app.module'
@@ -35,6 +36,7 @@ location.hash = ''
 
 async function start (): Promise<void> {
     const info = await invoke<HostInfo>('host_info')
+    const label = getCurrentWindow().label
     window['tabbyTauriHost'] = info
     Object.assign(process, { env: info.env, platform: info.platform, arch: info.arch })
     if (!info.debug) {
@@ -68,8 +70,9 @@ async function start (): Promise<void> {
     const bootstrapData: BootstrapData = {
         config,
         executable: info.executable,
-        isMainWindow: true,
-        windowID: 1,
+        // The first window is "main", the others "main-2", "main-3"… (src-tauri/src/windows.rs)
+        isMainWindow: label === 'main',
+        windowID: label === 'main' ? 1 : Number(label.split('-')[1]),
         installedPlugins,
         userPluginsPath: '',
     }

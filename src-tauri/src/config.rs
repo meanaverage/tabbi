@@ -3,7 +3,7 @@
 //! folder of its own, and then nothing of Tabby's is copied.
 use std::path::PathBuf;
 
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 pub fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = match std::env::var_os("TABBI_DATA_DIR") {
@@ -38,10 +38,17 @@ pub async fn config_read(app: AppHandle) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn config_write(app: AppHandle, content: String) -> Result<(), String> {
+pub async fn config_write(app: AppHandle, webview: tauri::Webview, content: String) -> Result<(), String> {
     let path = config_path(&app)?;
     // Written next to it and renamed over it, so a crash never leaves half a config.
     let tmp = path.with_extension("yaml.new");
     tokio::fs::write(&tmp, content).await.map_err(|e| e.to_string())?;
-    tokio::fs::rename(&tmp, &path).await.map_err(|e| e.to_string())
+    tokio::fs::rename(&tmp, &path).await.map_err(|e| e.to_string())?;
+    // The other windows load it again, as the Electron build's main process tells them to.
+    let saved_by = webview.label().to_string();
+    let _ = app.emit_filter("host:config-change", (), |target| match target {
+        tauri::EventTarget::WebviewWindow { label } | tauri::EventTarget::Webview { label } | tauri::EventTarget::Window { label } => *label != saved_by,
+        _ => false,
+    });
+    Ok(())
 }

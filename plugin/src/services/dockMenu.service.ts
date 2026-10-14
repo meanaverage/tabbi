@@ -1,14 +1,15 @@
 import { Injectable, NgZone } from '@angular/core'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { ConfigService, HostAppService, Platform, ProfilesService } from 'tabby-core'
+import { ConfigService, HostAppService, Platform, ProfilesService, TranslateService } from 'tabby-core'
 
 interface DockMenuItem {
     id: string
     label: string
 }
 
-/** The Dock icon's menu: recent profiles, then all of them, as Electron Tabby's DockMenuService (src-tauri/src/dock_menu.rs). */
+/** The Dock icon's menu: recent profiles, then all of them, then New Window, as Electron Tabby's DockMenuService
+ * (src-tauri/src/dock_menu.rs). */
 @Injectable({ providedIn: 'root' })
 export class DockMenuService {
     private actions = new Map<string, () => void>()
@@ -18,6 +19,7 @@ export class DockMenuService {
         private config: ConfigService,
         private hostApp: HostAppService,
         private profiles: ProfilesService,
+        private translate: TranslateService,
         zone: NgZone,
     ) {
         getCurrentWindow().listen<string>('host:dock-menu', event => zone.run(() => this.actions.get(event.payload)?.()))
@@ -40,6 +42,8 @@ export class DockMenuService {
             items.push({ id, label: profile.name })
             actions.set(id, () => this.profiles.openNewTabForProfile(profile))
         }
+        items.push({ id: 'new-window', label: this.translate.instant('New Window') })
+        actions.set('new-window', () => this.hostApp.newWindow())
         if (revision !== this.revision) {
             return
         }

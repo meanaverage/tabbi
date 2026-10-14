@@ -63,10 +63,12 @@ async function booted () {
     return false
 }
 
-function evaluate (code) {
+/** Runs code in a window of the app (the first one unless a label is given) and resolves with its result. */
+function evaluate (code, window = 'main') {
     const token = fs.readFileSync(path.join(dataDir, 'debug-token'), 'utf-8').trim()
+    const request = window === 'main' ? code : { window, code }
     return new Promise((resolve, reject) => {
-        const socket = net.connect(port, '127.0.0.1', () => socket.write(`${token}\n${JSON.stringify(code)}\n`))
+        const socket = net.connect(port, '127.0.0.1', () => socket.write(`${token}\n${JSON.stringify(request)}\n`))
         let buffer = ''
         socket.on('data', chunk => {
             buffer += chunk
@@ -294,6 +296,36 @@ try {
     const saved = fs.readFileSync(path.join(dataDir, 'config.yaml'), 'utf-8').includes('fontSize: 17')
     console.log(`${saved ? 'ok  ' : 'FAIL'} The config file has the change`)
     failed += saved ? 0 : 1
+
+    // New Window: a second window with its own tabs that shares the settings, then closed again.
+    let second = false
+    try {
+        const label = await evaluate(prelude + `
+            window.tabby.get(core.HostAppService).newWindow()
+            const { getAllWindows } = window.require('@tauri-apps/api/window')
+            return until(async () => (await getAllWindows()).map(w => w.label).find(l => l !== 'main'))`)
+        let up = false
+        for (let i = 0; i < 300 && !up; i++) {
+            await sleep(100)
+            up = await evaluate('return !!window.tabby', label).catch(() => false)
+        }
+        const bootstrap = await evaluate(`const b = window.tabby.get(window.require('tabby-core').BOOTSTRAP_DATA); return [b.isMainWindow, b.windowID]`, label)
+        await evaluate(prelude + `const config = window.tabby.get(core.ConfigService); config.store.terminal.fontSize = 19; await config.save(); return true`)
+        const shared = await evaluate(prelude + `return until(() => window.tabby.get(core.ConfigService).store.terminal.fontSize === 19)`, label)
+        const ran = await evaluate(prelude + `const t = await open(); return run(t, 'echo window-$((6*7))', 'window-42')`, label)
+        const dockItem = await evaluate(`const { invoke } = window.require('@tauri-apps/api/core'); return (await invoke('dock_menu_state')).items.some(i => i.id === 'new-window')`)
+        await evaluate(`window.require('@tauri-apps/api/window').getCurrentWindow().destroy(); return true`, label).catch(() => null)
+        await sleep(500)
+        const mainAlive = await evaluate('return !!window.tabby')
+        second = up && bootstrap[0] === false && bootstrap[1] > 1 && shared && ran && dockItem && mainAlive
+        if (!second) {
+            console.log(`     (${JSON.stringify({ label, up, bootstrap, shared, ran, dockItem, mainAlive })})`)
+        }
+    } catch (error) {
+        console.log(`     (${error.message.split('\n')[0]})`)
+    }
+    console.log(`${second ? 'ok  ' : 'FAIL'} New Window opens a second window that shares the settings, and closes again`)
+    failed += second ? 0 : 1
 
     // Quit goes through Tabby's close flow and the app exits; started again, the window has the size it was quit at.
     let restored = false

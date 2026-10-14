@@ -28,7 +28,7 @@ On first launch tabbi starts from a copy of your Tabby settings, if you have Tab
 
 ## What works
 
-- Local terminals, tabs and split panes
+- Local terminals, tabs and split panes, in as many windows as you like (⌘N)
 - Tabby's settings, themes and color schemes
 - SSH: passwords, key files, the SSH agent, saved passwords (in the Keychain), SFTP and port forwarding
 - Moving the window by its tab bar, with the window buttons where Tabby puts them
@@ -40,7 +40,6 @@ On first launch tabbi starts from a copy of your Tabby settings, if you have Tab
 ## Not yet
 
 - Installing plugins, or using plugins installed in Tabby
-- More than one window
 - Telnet and serial connections (left out on purpose)
 - Platforms other than macOS (tested on Apple Silicon)
 
