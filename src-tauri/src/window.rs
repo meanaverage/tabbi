@@ -167,19 +167,36 @@ pub fn webview_collect_garbage(window: WebviewWindow) {
     let _ = window;
 }
 
-/// For measurements: the process WebKit renders this window's page in (0 where that can't be told).
+/// For measurements: the WebKit processes this window uses, the one that runs its page (`web`), the one that draws
+/// (`gpu`) and, for a test instance, the one that does its networking (`network`). Private WebKit API; a process is
+/// left out where it can't be told.
 #[tauri::command]
-pub async fn webview_process_id(window: WebviewWindow) -> Result<i32, String> {
+pub async fn webview_pids(window: WebviewWindow) -> Result<std::collections::HashMap<&'static str, i32>, String> {
     #[cfg(target_os = "macos")]
     {
         let (tx, rx) = std::sync::mpsc::channel();
         window
             .with_webview(move |webview| unsafe {
-                use objc2::msg_send;
-                use objc2::runtime::AnyObject;
+                use objc2::runtime::{AnyObject, Sel};
+                use objc2::{msg_send, sel};
                 let view = webview.inner() as *mut AnyObject;
-                let available: bool = msg_send![view, respondsToSelector: objc2::sel!(_webProcessIdentifier)];
-                let _ = tx.send(if available { msg_send![view, _webProcessIdentifier] } else { 0 });
+                let responds = |object: *mut AnyObject, name: Sel| -> bool { msg_send![object, respondsToSelector: name] };
+                let mut pids = std::collections::HashMap::new();
+                if responds(view, sel!(_webProcessIdentifier)) {
+                    pids.insert("web", msg_send![view, _webProcessIdentifier]);
+                }
+                if responds(view, sel!(_gpuProcessIdentifier)) {
+                    pids.insert("gpu", msg_send![view, _gpuProcessIdentifier]);
+                }
+                // (asking for it starts the networking process if it isn't running, so only test instances ask)
+                if std::env::var_os("TABBI_DEBUG_PORT").is_some() {
+                    let configuration: *mut AnyObject = msg_send![view, configuration];
+                    let store: *mut AnyObject = msg_send![configuration, websiteDataStore];
+                    if responds(store, sel!(_networkProcessIdentifier)) {
+                        pids.insert("network", msg_send![store, _networkProcessIdentifier]);
+                    }
+                }
+                let _ = tx.send(pids);
             })
             .map_err(|e| e.to_string())?;
         rx.recv_timeout(std::time::Duration::from_secs(5)).map_err(|e| e.to_string())
@@ -187,7 +204,7 @@ pub async fn webview_process_id(window: WebviewWindow) -> Result<i32, String> {
     #[cfg(not(target_os = "macos"))]
     {
         let _ = window;
-        Ok(0)
+        Ok(std::collections::HashMap::new())
     }
 }
 

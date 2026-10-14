@@ -426,7 +426,7 @@ try {
     // Closing tabs gives their memory back: WebKit is asked to collect garbage once tabs stop closing.
     let freed = false
     try {
-        const pid = await evaluate(`return window.require('@tauri-apps/api/core').invoke('webview_process_id')`)
+        const pid = (await evaluate(`return window.require('@tauri-apps/api/core').invoke('webview_pids')`)).web
         const footprint = () => {
             const m = /Footprint: ([\d.]+) (KB|MB|GB)/.exec(execFileSync('footprint', [String(pid)], { encoding: 'utf-8' }))
             return Math.round(Number(m[1]) * { KB: 1 / 1024, MB: 1, GB: 1024 }[m[2]])
