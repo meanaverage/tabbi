@@ -27,6 +27,7 @@ interface HostInfo {
     version: string
     executable: string
     debug: boolean
+    background: boolean
 }
 
 // Always land on the start view (as Tabby's app/src/entry.ts does)

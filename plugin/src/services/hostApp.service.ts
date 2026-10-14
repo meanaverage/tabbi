@@ -1,4 +1,5 @@
-import { Injectable, Injector } from '@angular/core'
+import { Injectable, Injector, NgZone } from '@angular/core'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { HostAppService, Platform } from 'tabby-core'
 
 @Injectable()
@@ -11,12 +12,13 @@ export class TauriHostApp extends HostAppService {
         return this.platform
     }
 
-    // Needed for injector metadata
-    // eslint-disable-next-line @typescript-eslint/no-useless-constructor
     constructor (
         injector: Injector,
+        zone: NgZone,
     ) {
         super(injector)
+        // The app menu's Preferences… (src-tauri/src/menu.rs)
+        getCurrentWindow().listen('host:preferences-menu', () => zone.run(() => this.settingsUIRequest.next()))
     }
 
     newWindow (): void {
