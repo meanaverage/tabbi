@@ -1,0 +1,10 @@
+{
+  "name": "tabbi",
+  "private": true,
+  "version": "0.1.0",
+  "description": "tabbi: a minimal tabby-tauri. Tabby without Electron, built from a plain Tabby checkout",
+  "license": "MIT",
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.2"
+  }
+}

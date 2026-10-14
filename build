@@ -1,0 +1,3 @@
+#!/bin/sh
+# tabbi's one command: ./build <path to a Tabby checkout> [--debug]
+exec node "$(dirname "$0")/scripts/build.mjs" "$@"

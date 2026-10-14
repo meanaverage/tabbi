@@ -1,0 +1,52 @@
+[package]
+name = "tabbi"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "tabbi_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2.12", features = ["macos-private-api", "devtools"] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
+socket2 = "0.6"
+portable-pty = "0.9"
+uuid = { version = "1", features = ["v4"] }
+libc = "0.2"
+arboard = { version = "3", default-features = false }
+base64 = "0.22"
+log = "0.4"
+# SSH (src/ssh, derived from russh-napi, the native half of the `russh` npm package Tabby's SSH plugin uses)
+russh = { version = "0.64.1", default-features = false, features = ["ring", "rsa", "flate2"] }
+russh-sftp = "3"
+tokio-socks = "0.5.2"
+async-http-proxy = { version = "1.2.5", features = ["runtime-tokio"] }
+delegate = "0.13"
+futures = "0.3"
+thiserror = "2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libproc = "0.14"
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSWindow", "NSView", "NSButton", "NSControl", "objc2-core-foundation"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry", "NSString", "objc2-core-foundation"] }
+security-framework = "3"
+
+# Dependencies optimized in debug builds too, so SSH encryption runs at full speed there.
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+strip = true
+panic = "abort"

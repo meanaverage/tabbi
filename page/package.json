@@ -1,0 +1,8 @@
+{
+  "name": "tabbi-page",
+  "private": true,
+  "version": "0.1.0",
+  "devDependencies": {
+    "@tauri-apps/api": "2.12.3"
+  }
+}
