@@ -18,6 +18,8 @@ const port = 9500 + Math.floor(Math.random() * 400)
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tabbi-test-'))
 const log = path.join(dataDir, 'app.log')
 const sleep = ms => new Promise(r => setTimeout(r, ms))
+// (macOS doesn't reopen windows or ask whether to after a crash: a test instance never shows that question)
+const noRestore = ['-ApplePersistenceIgnoreState', 'YES']
 const only = process.argv[2]
 
 // The throwaway SSH server
@@ -53,7 +55,7 @@ const sshd = spawn('/usr/sbin/sshd', ['-D', '-e', '-f', path.join(sshDir, 'sshd_
 let currentDir = dataDir
 const start = (dir = dataDir, env = {}) => {
     currentDir = dir
-    return spawn(exe, [], {
+    return spawn(exe, noRestore, {
         env: { ...process.env, TABBI_DEBUG_PORT: String(port), TABBI_DATA_DIR: dir, SSH_AUTH_SOCK: agentSocket, ...env },
         stdio: ['ignore', fs.openSync(log, 'a'), fs.openSync(log, 'a')],
     })
@@ -286,11 +288,16 @@ const checks = [
         await invoke('window_set_traffic_light_position', { x: 14, y: 11 }); await sleep(200)
         if (seen.join(' ') !== '14,11 14,11 14,11 20,16') throw new Error(seen.join(' '))
         return true`],
-    ['The Mac window buttons stay put while the window is resized: every size is drawn with them in place', `
+    ['The Mac window buttons stay put, macOS\'s distance apart, while the window is resized: every size is drawn with them in place', `
         const { invoke } = window.require('@tauri-apps/api/core')
-        const seen = (await invoke('window_traffic_light_resize_steps', { steps: 20 })).map(p => p.map(v => Math.round(v)).join(','))
-        const off = seen.filter(p => p !== '14,11')
-        if (off.length) throw new Error(off.length + ' of ' + seen.length + ' drawn elsewhere: ' + [...new Set(off)].join(' '))
+        const [x, y] = [14, 11]
+        const { rest, steps, native, width } = await invoke('window_traffic_light_resize_steps', { steps: 20 })
+        // close, minimize and zoom's left edges and the top, where they belong
+        const home = [x, x + native[0], x + native[0] + native[1], y].map(Math.round).join(',')
+        const all = [rest, ...steps].map(p => p.map(Math.round).join(','))
+        const off = all.filter(p => p !== home)
+        if (!(native[0] > width + 2 && native[1] > width + 2)) throw new Error('buttons with no room between them: ' + JSON.stringify({ native, width }))
+        if (off.length) throw new Error(off.length + ' of ' + all.length + ' drawn elsewhere than ' + home + ': ' + [...new Set(off)].join(' '))
         // (and keeping them there isn't a tug of war with macOS: nothing moves them while nothing happens)
         await sleep(500)
         const before = await invoke('window_traffic_light_moves'); await sleep(1500)
