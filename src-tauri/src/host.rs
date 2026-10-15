@@ -13,6 +13,8 @@ pub struct HostInfo {
     version: String,
     executable: String,
     debug: bool,
+    /// A test instance (debug::background): it stays behind and leaves global hotkeys alone.
+    background: bool,
 }
 
 fn node_platform() -> &'static str {
@@ -57,6 +59,7 @@ pub fn host_info(app: tauri::AppHandle) -> HostInfo {
         version: app.package_info().version.to_string(),
         executable: std::env::current_exe().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default(),
         debug: cfg!(debug_assertions) || std::env::var_os("TABBY_DEV").is_some(),
+        background: crate::debug::background(),
     }
 }
 

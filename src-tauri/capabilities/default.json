@@ -16,6 +16,16 @@
     "core:window:allow-set-focus",
     "core:window:allow-show",
     "core:window:allow-hide",
+    "core:window:allow-set-progress-bar",
+    "core:window:allow-set-position",
+    "core:window:allow-set-always-on-top",
+    "core:window:allow-unminimize",
+    "core:window:allow-unmaximize",
+    "core:window:allow-cursor-position",
+    "core:window:allow-available-monitors",
+    "core:window:allow-primary-monitor",
+    "core:window:allow-monitor-from-point",
+    "core:menu:default",
     "dialog:allow-open"
   ]
 }

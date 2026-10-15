@@ -47,10 +47,21 @@ const sshd = spawn('/usr/sbin/sshd', ['-D', '-e', '-f', path.join(sshDir, 'sshd_
     stdio: ['ignore', 'ignore', fs.openSync(path.join(sshDir, 'sshd.log'), 'a')],
 })
 
-const app = spawn(exe, [], {
+const start = () => spawn(exe, [], {
     env: { ...process.env, TABBI_DEBUG_PORT: String(port), TABBI_DATA_DIR: dataDir, SSH_AUTH_SOCK: agentSocket },
     stdio: ['ignore', fs.openSync(log, 'a'), fs.openSync(log, 'a')],
 })
+let app = start()
+
+async function booted () {
+    for (let i = 0; i < 300; i++) {
+        await sleep(100)
+        if (fs.existsSync(path.join(dataDir, 'debug-token')) && await evaluate('return !!window.tabby').catch(() => false)) {
+            return true
+        }
+    }
+    return false
+}
 
 function evaluate (code) {
     const token = fs.readFileSync(path.join(dataDir, 'debug-token'), 'utf-8').trim()
@@ -200,18 +211,73 @@ const checks = [
         await invoke('window_set_traffic_light_position', { x: 14, y: 11 }); await sleep(200)
         if (seen.join(' ') !== '14,11 14,11 14,11 20,16') throw new Error(seen.join(' '))
         return true`],
+    ['Fonts: Settings lists the installed fonts', `
+        const fonts = await window.tabby.get(core.PlatformService).listFonts()
+        return fonts.length > 20 && fonts.includes('Menlo')`],
+    ['Right-click menus are native menus', `
+        const menu = await window.tabby.get(core.PlatformService).buildMenu([
+            { label: 'One', click: () => null }, { type: 'separator' },
+            { label: 'More', submenu: [{ label: 'Two' }] }, { type: 'checkbox', label: 'Three', checked: true },
+        ])
+        return (await menu.items()).length === 4`],
+    ["A text field's menu copies its selection", `
+        const platform = window.tabby.get(core.PlatformService)
+        const input = document.createElement('input')
+        input.value = 'hello world'
+        document.body.appendChild(input)
+        input.setSelectionRange(0, 5)
+        const copy = platform.textFieldMenus.editItems(input).find(item => item.label === 'Copy')
+        copy.click()
+        input.remove()
+        return copy.enabled && platform.readClipboard() === 'hello'`],
+    ['Dropping a file on a terminal types its quoted path', `
+        const t = await open()
+        // (dropped again until Tabby's drop handling for the new terminal is in place)
+        await until(async () => {
+            const drop = new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: new DataTransfer() })
+            drop.tauriPaths = ["/tmp/a b/it's"]
+            t.frontend.xterm.element.dispatchEvent(drop)
+            await sleep(300)
+            return screen(t).includes("'/tmp/a b/it'")
+        })
+        t.sendInput('\\x15')
+        return true`],
+    ['Preferences in the app menu opens Settings', `
+        await window.require('@tauri-apps/api/event').emit('host:preferences-menu')
+        return until(() => app.activeTab?.constructor?.name === 'SettingsTabComponent')`],
+    ['The Dock menu lists the profiles', `
+        const { invoke } = window.require('@tauri-apps/api/core')
+        return until(async () => (await invoke('dock_menu_state')).items.length > 0)`],
+    ['Docking puts the window on the right edge, half the screen wide', `
+        const { getCurrentWindow, availableMonitors } = window.require('@tauri-apps/api/window')
+        const config = window.tabby.get(core.ConfigService), docking = window.tabby.get(core.DockingService), w = getCurrentWindow()
+        Object.assign(config.store.appearance, { dock: 'right', dockFill: 0.5, dockSpace: 1, dockAlwaysOnTop: false })
+        await docking.applyDock()
+        const position = await w.outerPosition(), size = await w.outerSize()
+        const monitor = (await availableMonitors()).find(m => position.x >= m.position.x && position.x < m.position.x + m.size.width)
+        config.store.appearance.dock = 'off'
+        await docking.applyDock()
+        const area = monitor.workArea
+        if (Math.abs(position.x + size.width - (area.position.x + area.size.width)) > 2 || Math.abs(size.width - Math.round(area.size.width / 2)) > 2) {
+            throw new Error(JSON.stringify({ position, size, area }))
+        }
+        return true`],
+    ['The window looks apply: vibrancy, opacity, dark mode', `
+        const { invoke } = window.require('@tauri-apps/api/core')
+        await invoke('window_set_vibrancy', { enabled: true, kind: 'blur' })
+        await invoke('window_set_opacity', { opacity: 0.9 })
+        await invoke('window_set_dark_mode', { mode: 'dark' })
+        await invoke('window_set_vibrancy', { enabled: false, kind: null })
+        await invoke('window_set_opacity', { opacity: 1 })
+        await invoke('window_set_dark_mode', { mode: 'auto' })
+        return true`],
     ['Settings open', `app.openNewTabRaw({ type: window.require('tabby-settings').SettingsTabComponent }); return until(() => app.activeTab?.constructor?.name === 'SettingsTabComponent')`],
     ['Settings are saved', `const config = window.tabby.get(core.ConfigService); config.store.terminal.fontSize = 17; await config.save(); return true`],
 ]
 
 let failed = 0
 try {
-    let booted = false
-    for (let i = 0; i < 300 && !booted; i++) {
-        await sleep(100)
-        booted = fs.existsSync(path.join(dataDir, 'debug-token')) && await evaluate('return !!window.tabby').catch(() => false)
-    }
-    if (!booted) {
+    if (!await booted()) {
         throw new Error('the app did not start')
     }
     for (const [name, code, before] of checks) {
@@ -228,6 +294,36 @@ try {
     const saved = fs.readFileSync(path.join(dataDir, 'config.yaml'), 'utf-8').includes('fontSize: 17')
     console.log(`${saved ? 'ok  ' : 'FAIL'} The config file has the change`)
     failed += saved ? 0 : 1
+
+    // Quit goes through Tabby's close flow and the app exits; started again, the window has the size it was quit at.
+    let restored = false
+    try {
+        await evaluate(prelude + `
+            const { LogicalSize, getCurrentWindow } = window.require('@tauri-apps/api/window')
+            await getCurrentWindow().setSize(new LogicalSize(910, 620))
+            for (const tab of [...app.tabs]) {
+                await app.closeTab(tab, false)
+            }
+            window.tabby.get(core.PlatformService).quit()
+            return true`)
+        const exited = await Promise.race([new Promise(resolve => app.once('exit', () => resolve(true))), sleep(15000).then(() => false)])
+        if (!exited) {
+            throw new Error('the app did not quit')
+        }
+        app = start()
+        if (!await booted()) {
+            throw new Error('the app did not start again')
+        }
+        const size = await evaluate(`const w = window.require('@tauri-apps/api/window').getCurrentWindow(); const s = (await w.innerSize()).toLogical(await w.scaleFactor()); return [Math.round(s.width), Math.round(s.height)]`)
+        restored = size[0] === 910 && size[1] === 620
+        if (!restored) {
+            console.log(`     (reopened at ${size.join('x')})`)
+        }
+    } catch (error) {
+        console.log(`     (${error.message.split('\n')[0]})`)
+    }
+    console.log(`${restored ? 'ok  ' : 'FAIL'} Quit closes the app through Tabby, and it reopens at the size it was quit at`)
+    failed += restored ? 0 : 1
 } catch (error) {
     console.log(`FAIL ${error.message}`)
     failed++

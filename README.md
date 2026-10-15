@@ -32,11 +32,15 @@ On first launch tabbi starts from a copy of your Tabby settings, if you have Tab
 - Tabby's settings, themes and color schemes
 - SSH: passwords, key files, the SSH agent, saved passwords (in the Keychain), SFTP and port forwarding
 - Moving the window by its tab bar, with the window buttons where Tabby puts them
+- The Mac menu bar, native right-click menus, and your installed fonts in Settings
+- The window keeps its size and position, and can dock to a screen edge with a system-wide show/hide hotkey
+- Vibrancy, opacity and dark mode from Settings, progress on the Dock icon, and profiles in the Dock icon's menu
+- Dropping files on a terminal types their paths
 
 ## Not yet
 
 - Installing plugins, or using plugins installed in Tabby
-- More than one window, and Tabby's own app menus
+- More than one window
 - Telnet and serial connections (left out on purpose)
 - Platforms other than macOS (tested on Apple Silicon)
 

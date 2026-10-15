@@ -1,14 +1,19 @@
 mod clipboard;
 mod config;
 mod debug;
+mod dock_menu;
 mod fs;
 mod host;
+mod hotkey;
 mod keychain;
+mod menu;
 mod net;
 mod pty;
 mod ssh;
 mod sync;
+mod system;
 mod traffic_lights;
+mod window;
 
 pub fn run() {
     let background = debug::background();
@@ -18,6 +23,9 @@ pub fn run() {
     let builder = builder.activate_ignoring_other_apps(!background);
     builder
         .plugin(tauri_plugin_dialog::init())
+        .plugin(hotkey::plugin())
+        .menu(|app| menu::build(app))
+        .on_menu_event(|app, event| menu::on_event(app, event.id().as_ref()))
         .manage(pty::Ptys::default())
         .manage(clipboard::Clipboard::default())
         .manage(ssh::Ssh::default())
@@ -29,6 +37,19 @@ pub fn run() {
             if background {
                 app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             }
+            // The window's size and position are kept between launches (a test instance never restores "visible":
+            // the plugin would show the window and focus it).
+            let flags = if background {
+                tauri_plugin_window_state::StateFlags::all() - tauri_plugin_window_state::StateFlags::VISIBLE
+            } else {
+                tauri_plugin_window_state::StateFlags::all()
+            };
+            app.handle().plugin(
+                tauri_plugin_window_state::Builder::new()
+                    .with_state_flags(flags)
+                    .with_filename(config::window_state_path(app.handle())?.to_string_lossy())
+                    .build(),
+            )?;
             // The window is made here rather than from the config, so that a test instance can stay behind.
             let config = app.config().app.windows.first().cloned().ok_or("no window config")?;
             let builder = tauri::WebviewWindowBuilder::from_config(app.handle(), &config)?
@@ -47,16 +68,27 @@ pub fn run() {
                 debug::keep_behind(&window);
             }
             traffic_lights::redraw(&window.as_ref().window());
+            dock_menu::install(app.handle())?;
             debug::start(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {
             traffic_lights::on_window_event(window, event);
+            dock_menu::window_event(window.label(), event);
             debug::on_window_event(window, event);
         })
         .invoke_handler(tauri::generate_handler![
             host::host_info,
             host::open_external,
+            system::list_fonts,
+            system::app_quit,
+            window::window_set_vibrancy,
+            window::window_set_opacity,
+            window::window_set_dark_mode,
+            window::window_set_docked,
+            hotkey::global_hotkey_set,
+            dock_menu::dock_menu_set,
+            dock_menu::dock_menu_state,
             traffic_lights::window_set_traffic_light_position,
             traffic_lights::window_set_title,
             traffic_lights::window_traffic_light_frame,

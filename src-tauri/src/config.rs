@@ -14,6 +14,11 @@ pub fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+/// Where the window's size and position are kept, next to the config.
+pub fn window_state_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(data_dir(app)?.join("window-state.json"))
+}
+
 fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(data_dir(app)?.join("config.yaml"))
 }

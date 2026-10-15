@@ -8,6 +8,7 @@ import * as tauriWebviewWindow from '@tauri-apps/api/webviewWindow'
 import * as tauriApp from '@tauri-apps/api/app'
 import * as tauriMenu from '@tauri-apps/api/menu'
 import * as tauriDpi from '@tauri-apps/api/dpi'
+import * as tauriWebview from '@tauri-apps/api/webview'
 import * as nodeFs from './node/fs'
 import * as nodeNet from './node/net'
 import * as keytar from './node/keytar'
@@ -22,6 +23,7 @@ register('@tauri-apps/api/webviewWindow', tauriWebviewWindow)
 register('@tauri-apps/api/app', tauriApp)
 register('@tauri-apps/api/menu', tauriMenu)
 register('@tauri-apps/api/dpi', tauriDpi)
+register('@tauri-apps/api/webview', tauriWebview)
 
 register('fs', nodeFs.fs)
 register('fs/promises', nodeFs.fsPromises)

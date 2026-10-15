@@ -1,32 +1,34 @@
-import '@vaadin/vaadin-context-menu'
-import { Injectable } from '@angular/core'
+import { Injectable, NgZone } from '@angular/core'
 import { invoke } from '@tauri-apps/api/core'
+import { LogicalPosition } from '@tauri-apps/api/dpi'
+import { CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu } from '@tauri-apps/api/menu'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { NgbModal } from '@ng-bootstrap/ng-bootstrap'
-import { PlatformService, ClipboardContent, MenuItemOptions, MessageBoxOptions, MessageBoxResult, FileUpload, FileUploadOptions, FileDownload, DirectoryDownload, HTMLFileUpload, DirectoryUpload } from 'tabby-core'
-
-// eslint-disable-next-line no-duplicate-imports
-import type { ContextMenuElement, ContextMenuItem } from '@vaadin/vaadin-context-menu'
+import { PlatformService, ClipboardContent, MenuItemOptions, MessageBoxOptions, MessageBoxResult, FileUpload, FileUploadOptions, FileDownload, DirectoryDownload, HTMLFileUpload, DirectoryUpload, PlatformTheme, TranslateService } from 'tabby-core'
 
 import { MessageBoxModalComponent } from './components/messageBoxModal.component'
+import { TextFieldMenus } from './textFieldMenus'
 import { syncCall } from './sync'
-import './styles.scss'
 
 
 @Injectable()
 export class TauriPlatformService extends PlatformService {
-    private menu: ContextMenuElement
-    private contextMenuHandlers = new Map<ContextMenuItem, () => void>()
+    /** Also for tests. */
+    readonly textFieldMenus: TextFieldMenus
     private fileSelector: HTMLInputElement
+    private darkScheme = window.matchMedia('(prefers-color-scheme: dark)')
 
     constructor (
+        private zone: NgZone,
         private ngbModal: NgbModal,
+        translate: TranslateService,
     ) {
         super()
-        this.menu = window.document.createElement('vaadin-context-menu')
-        this.menu.addEventListener('item-selected', e => {
-            this.contextMenuHandlers.get(e.detail.value)?.()
-        })
-        document.body.appendChild(this.menu)
+        this.textFieldMenus = new TextFieldMenus(this, translate)
+        this.textFieldMenus.install(document)
+        // The system's light or dark mode, which Tabby follows when its color scheme mode is "auto".
+        this.darkScheme.addEventListener('change', () => this.zone.run(() => this.themeChanged.next(this.getTheme())))
+        getCurrentWindow().onScaleChanged(() => this.zone.run(() => this.displayMetricsChanged.next()))
 
         this.fileSelector = document.createElement('input')
         this.fileSelector.type = 'file'
@@ -63,30 +65,37 @@ export class TauriPlatformService extends PlatformService {
     }
 
     async listFonts (): Promise<string[]> {
-        return []
+        return invoke<string[]>('list_fonts')
     }
 
+    getTheme (): PlatformTheme {
+        return this.darkScheme.matches ? 'dark' : 'light'
+    }
+
+    /** A native menu: at the pointer for a click, under the element for one opened from the keyboard. */
     popupContextMenu (menu: MenuItemOptions[], event?: MouseEvent): void {
-        this.contextMenuHandlers.clear()
-        this.menu.items = menu
-            .filter(x => x.type !== 'separator')
-            .map(x => this.remapMenuItem(x))
-        setTimeout(() => {
-            this.menu.open(event)
-        }, 10)
+        const at = event && !event.isTrusted ? new LogicalPosition(event.clientX, event.clientY) : undefined
+        this.buildMenu(menu).then(m => m.popup(at))
     }
 
-    private remapMenuItem (item: MenuItemOptions): ContextMenuItem {
-        const cmi = {
-            text: item.label,
-            disabled: !(item.enabled ?? true),
-            checked: item.checked,
-            children: item.submenu?.map(i => this.remapMenuItem(i)),
+    /** Also for tests: what popupContextMenu shows. */
+    async buildMenu (items: MenuItemOptions[]): Promise<Menu> {
+        return Menu.new({ items: await Promise.all(items.map(i => this.buildMenuItem(i))) })
+    }
+
+    private async buildMenuItem (item: MenuItemOptions): Promise<any> {
+        const action = item.click ? () => this.zone.run(() => item.click!()) : undefined
+        const enabled = item.enabled ?? true
+        if (item.type === 'separator') {
+            return PredefinedMenuItem.new({ item: 'Separator' })
         }
-        if (item.click) {
-            this.contextMenuHandlers.set(cmi, item.click)
+        if (item.submenu) {
+            return Submenu.new({ text: item.label ?? '', enabled, items: await Promise.all(item.submenu.map(i => this.buildMenuItem(i))) })
         }
-        return cmi
+        if (item.type === 'checkbox' || item.type === 'radio') {
+            return CheckMenuItem.new({ text: item.label ?? '', enabled, checked: !!item.checked, action })
+        }
+        return MenuItem.new({ text: item.label ?? '', enabled, action })
     }
 
     async showMessageBox (options: MessageBoxOptions): Promise<MessageBoxResult> {
@@ -104,7 +113,7 @@ export class TauriPlatformService extends PlatformService {
     }
 
     quit (): void {
-        window.close()
+        invoke('app_quit')
     }
 
     async startDownload (name: string, mode: number, size: number): Promise<FileDownload|null> {
