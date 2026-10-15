@@ -26,6 +26,7 @@
     "core:window:allow-primary-monitor",
     "core:window:allow-monitor-from-point",
     "core:menu:default",
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "dialog:allow-save"
   ]
 }

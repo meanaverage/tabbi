@@ -111,6 +111,10 @@ register('electron', {})
 register('@electron/remote', {})
 
 register('@angular/core', require('@angular/core'))
+// (Angular 16 and later; plugins built against them use it. Optional, so the page also builds on Tabby's Angular 15.)
+try {
+    register('@angular/core/rxjs-interop', require('@angular/core/rxjs-interop'))
+} catch { }
 register('@angular/cdk', require('@angular/cdk'))
 register('@angular/cdk/clipboard', require('@angular/cdk/clipboard'))
 register('@angular/cdk/drag-drop', require('@angular/cdk/drag-drop'))

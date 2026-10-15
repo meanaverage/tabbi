@@ -6,6 +6,10 @@ import { HotkeyDescription, HotkeyProvider, TranslateService } from 'tabby-core'
 export class TauriHotkeyProvider extends HotkeyProvider {
     hotkeys: HotkeyDescription[] = [
         {
+            id: 'new-window',
+            name: this.translate.instant('New window'),
+        },
+        {
             id: 'toggle-window',
             name: this.translate.instant('Toggle terminal window'),
         },

@@ -14,6 +14,7 @@ mod sync;
 mod system;
 mod traffic_lights;
 mod window;
+mod windows;
 
 pub fn run() {
     let background = debug::background();
@@ -51,23 +52,10 @@ pub fn run() {
                     .build(),
             )?;
             // The window is made here rather than from the config, so that a test instance can stay behind.
-            let config = app.config().app.windows.first().cloned().ok_or("no window config")?;
-            let builder = tauri::WebviewWindowBuilder::from_config(app.handle(), &config)?
-                .focused(!background)
-                .visible(!background);
-            #[cfg(target_os = "macos")]
-            let builder = match debug::web_store() {
-                Some(id) => {
-                    eprintln!("debug: web storage {}", uuid::Uuid::from_bytes(id).hyphenated().to_string().to_uppercase());
-                    builder.data_store_identifier(id)
-                }
-                None => builder,
-            };
-            let window = builder.build()?;
-            if background {
-                debug::keep_behind(&window);
+            windows::build(app.handle(), "main")?;
+            if let Some(id) = debug::web_store() {
+                eprintln!("debug: web storage {}", uuid::Uuid::from_bytes(id).hyphenated().to_string().to_uppercase());
             }
-            traffic_lights::redraw(&window.as_ref().window());
             dock_menu::install(app.handle())?;
             debug::start(app.handle());
             Ok(())
@@ -86,6 +74,10 @@ pub fn run() {
             window::window_set_opacity,
             window::window_set_dark_mode,
             window::window_set_docked,
+            window::window_frame_rate,
+            window::webview_collect_garbage,
+            window::webview_pids,
+            windows::window_new,
             hotkey::global_hotkey_set,
             dock_menu::dock_menu_set,
             dock_menu::dock_menu_state,
@@ -95,6 +87,7 @@ pub fn run() {
             clipboard::clipboard_read,
             clipboard::clipboard_write,
             config::config_read,
+            config::config_first_launch,
             config::config_write,
             debug::debug_reply,
             debug::console_log,

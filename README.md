@@ -24,11 +24,11 @@ open out/tabbi.app
 
 Move `out/tabbi.app` to Applications to keep it. The first build downloads Tabby's packages and compiles the app, so it takes a while and needs about 10 GB of free disk space. To update, pull both repos and run `./build ../tabby` again.
 
-On first launch tabbi starts from a copy of your Tabby settings, if you have Tabby installed. Tabby's own settings aren't changed.
+On first launch, if you have Tabby installed, tabbi asks whether to bring your Tabby settings over. Tabby's own settings aren't changed.
 
 ## What works
 
-- Local terminals, tabs and split panes
+- Local terminals, tabs and split panes, in as many windows as you like (⌘N)
 - Tabby's settings, themes and color schemes
 - SSH: passwords, key files, the SSH agent, saved passwords (in the Keychain), SFTP and port forwarding
 - Moving the window by its tab bar, with the window buttons where Tabby puts them
@@ -40,7 +40,6 @@ On first launch tabbi starts from a copy of your Tabby settings, if you have Tab
 ## Not yet
 
 - Installing plugins, or using plugins installed in Tabby
-- More than one window
 - Telnet and serial connections (left out on purpose)
 - Platforms other than macOS (tested on Apple Silicon)
 
@@ -51,6 +50,8 @@ Tabby keeps everything that depends on Electron in one plugin, `tabby-electron`.
 `./build` copies the Tabby checkout into `.build/`, adds these parts to the copy, builds it, then builds the app with Tauri. The Tabby checkout itself is never changed.
 
 `node scripts/test.mjs` checks a built app end to end: terminals, SSH against a throwaway local server, window dragging, settings. Its test window stays behind your other windows and uses its own settings, clipboard and passwords.
+
+`node scripts/bench.mjs` measures the same way how long a flood of terminal output takes to get through, and how quickly typing echoes back.
 
 ## Credits and license
 

@@ -3,7 +3,7 @@
 // web storage, clipboard and password store; window behind the others, never takes the keyboard), drives Tabby
 // inside it, closes it. SSH goes to a throwaway OpenSSH server on 127.0.0.1 with throwaway keys (macOS's own sshd,
 // run as you), stopped at the end.
-//   node scripts/test.mjs
+//   node scripts/test.mjs [only the checks whose names match this regular expression]
 import * as fs from 'node:fs'
 import * as net from 'node:net'
 import * as os from 'node:os'
@@ -12,11 +12,13 @@ import * as url from 'node:url'
 import { execFileSync, spawn } from 'node:child_process'
 
 const root = path.resolve(url.fileURLToPath(new URL('.', import.meta.url)), '..')
-const exe = path.join(root, 'out/tabbi.app/Contents/MacOS/tabbi')
+// (TABBI_APP: another built tabbi.app to check instead)
+const exe = path.join(process.env.TABBI_APP ?? path.join(root, 'out/tabbi.app'), 'Contents/MacOS/tabbi')
 const port = 9500 + Math.floor(Math.random() * 400)
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tabbi-test-'))
 const log = path.join(dataDir, 'app.log')
 const sleep = ms => new Promise(r => setTimeout(r, ms))
+const only = process.argv[2]
 
 // The throwaway SSH server
 const sshDir = path.join(dataDir, 'sshd')
@@ -47,26 +49,35 @@ const sshd = spawn('/usr/sbin/sshd', ['-D', '-e', '-f', path.join(sshDir, 'sshd_
     stdio: ['ignore', 'ignore', fs.openSync(path.join(sshDir, 'sshd.log'), 'a')],
 })
 
-const start = () => spawn(exe, [], {
-    env: { ...process.env, TABBI_DEBUG_PORT: String(port), TABBI_DATA_DIR: dataDir, SSH_AUTH_SOCK: agentSocket },
-    stdio: ['ignore', fs.openSync(log, 'a'), fs.openSync(log, 'a')],
-})
+// The data folder of the app that's running (a check further down starts copies with fresh ones).
+let currentDir = dataDir
+const start = (dir = dataDir, env = {}) => {
+    currentDir = dir
+    return spawn(exe, [], {
+        env: { ...process.env, TABBI_DEBUG_PORT: String(port), TABBI_DATA_DIR: dir, SSH_AUTH_SOCK: agentSocket, ...env },
+        stdio: ['ignore', fs.openSync(log, 'a'), fs.openSync(log, 'a')],
+    })
+}
 let app = start()
 
 async function booted () {
     for (let i = 0; i < 300; i++) {
         await sleep(100)
-        if (fs.existsSync(path.join(dataDir, 'debug-token')) && await evaluate('return !!window.tabby').catch(() => false)) {
+        // (up once Tabby has loaded the settings)
+        const up = `return !!window.tabby?.get(window.require('tabby-core').ConfigService).store?.profiles`
+        if (fs.existsSync(path.join(currentDir, 'debug-token')) && await evaluate(up).catch(() => false)) {
             return true
         }
     }
     return false
 }
 
-function evaluate (code) {
-    const token = fs.readFileSync(path.join(dataDir, 'debug-token'), 'utf-8').trim()
+/** Runs code in a window of the app (the first one unless a label is given) and resolves with its result. */
+function evaluate (code, window = 'main') {
+    const token = fs.readFileSync(path.join(currentDir, 'debug-token'), 'utf-8').trim()
+    const request = window === 'main' ? code : { window, code }
     return new Promise((resolve, reject) => {
-        const socket = net.connect(port, '127.0.0.1', () => socket.write(`${token}\n${JSON.stringify(code)}\n`))
+        const socket = net.connect(port, '127.0.0.1', () => socket.write(`${token}\n${JSON.stringify(request)}\n`))
         let buffer = ''
         socket.on('data', chunk => {
             buffer += chunk
@@ -87,16 +98,76 @@ const prelude = `
     const sleep = ms => new Promise(r => setTimeout(r, ms))
     const until = async (f, ms = 10000) => { for (let t = 0; t < ms; t += 100) { const v = await f(); if (v) return v; await sleep(100) } throw new Error('timed out: ' + f) }
     const screen = t => { const b = t.frontend.xterm.buffer.active, out = []; for (let i = 0; i < b.length; i++) { const l = b.getLine(i)?.translateToString(true); if (l && l.trim()) out.push(l) } return out.join('\\n') }
-    const open = async cwd => { const t = await window.tabby.get(local.TerminalService).openTab(null, cwd ?? null); return ready(t) }
+    // (in Angular's zone, as a click would: outside it, a new tab may wait for something else to update the page)
+    const zone = window.tabby.get(window.require('@angular/core').NgZone)
+    const open = async cwd => { const t = await zone.run(() => window.tabby.get(local.TerminalService).openTab(null, cwd ?? null)); return ready(t) }
     const ready = t => until(() => t.frontend?.xterm && t.session?.open && t)
     const fs_exists = p => window.require('fs').existsSync(p)
     const holder = t => app.tabs.find(x => x === t || x.getAllTabs?.().includes(t))
     const run = async (t, command, expect) => { t.sendInput(command + '\\r'); await until(() => screen(t).includes(expect)); return true }
+    // A program on its own PTY, without a tab: what it printed by the time its exit came, and the exit code.
+    const program = async (command, args) => {
+        const pty = await window.tabby.get(local.PTYInterface).spawn(command, args, { env: { PATH: '/usr/bin:/bin', LANG: 'en_US.UTF-8' }, cols: 80, rows: 24 })
+        const decoder = new TextDecoder(); let text = '', exit = null, closed = false
+        pty.subscribe('data', d => { pty.ackData(d.length); text += decoder.decode(d, { stream: true }) })
+        pty.subscribe('exit', code => { exit = { text, code } })
+        pty.subscribe('close', () => { closed = true })
+        await until(() => closed, 30000)
+        return exit ?? { text, code: 'no exit' }
+    }
 `
 
 const checks = [
     ['Tabby starts with every plugin', `return (window.pluginModules ?? []).length === ${JSON.parse(fs.readFileSync(path.join(root, '.build/page/plugins.json'), 'utf-8')).length}`],
     ['A terminal runs a command', `const t = await open(); return run(t, 'echo tt-$((6*7))', 'tt-42')`],
+    ["A quick program's output comes before its exit", `
+        const seen = []
+        for (let i = 0; i < 10; i++) {
+            const { text, code } = await program('/bin/echo', ['quick-' + i])
+            if (!text.includes('quick-' + i) || code !== 0) seen.push({ i, text, code })
+        }
+        if (seen.length) throw new Error(JSON.stringify(seen))
+        return true`],
+    ['Output written right before exiting all comes before the exit', `
+        const { text, code } = await program('/bin/sh', ['-c', 'seq 1 100000; printf tail-end; exit 3'])
+        const numbers = text.split('\\r\\n').slice(0, -1)
+        const whole = numbers.length === 100000 && numbers.every((n, i) => n === String(i + 1))
+        if (!(whole && text.endsWith('tail-end') && code === 3)) throw new Error(JSON.stringify({ lines: numbers.length, end: text.slice(-30), code }))
+        return true`],
+    ['A flood of output arrives whole, its characters never cut in two', `
+        const t = await open()
+        let text = ''
+        const subscription = t.session.output$.subscribe(s => text += s)
+        t.sendInput("seq 1 100000 | sed 's/$/ é字🎉/'; echo utf-$((6*7))\\r")
+        await until(() => text.includes('utf-42'), 60000)
+        subscription.unsubscribe()
+        const numbers = [...text.matchAll(/(\\d+) é字🎉/g)].map(m => Number(m[1]))
+        const whole = numbers.length === 100000 && numbers.every((n, i) => n === i + 1)
+        if (!(whole && !text.includes('\\ufffd'))) throw new Error(JSON.stringify({ lines: numbers.length, broken: text.split('\\ufffd').length - 1 }))
+        return true`],
+    ["A typed key's reply is drawn at once, not at the next animation frame", `
+        const t = await open(), xterm = t.frontend.xterm, buffer = xterm._core._writeBuffer
+        xterm.options.cursorBlink = false
+        await sleep(500)
+        // Drawn since the reply was handed to xterm, by the time xterm has read it?
+        let drawn = null
+        const write = buffer.write
+        buffer.write = function (...args) { drawn = false; return write.apply(this, args) }
+        const render = xterm.onRender(() => { if (drawn === false) drawn = true })
+        const results = []
+        for (let i = 0; i < 5; i++) {
+            const parsed = new Promise(resolve => { const p = xterm.onWriteParsed(() => { p.dispose(); resolve(drawn) }) })
+            const key = new KeyboardEvent('keydown', { key: 'x', code: 'KeyX', keyCode: 88, which: 88, bubbles: true, cancelable: true })
+            xterm.textarea.dispatchEvent(key)
+            if (!key.defaultPrevented) xterm.textarea.dispatchEvent(new KeyboardEvent('keypress', { key: 'x', code: 'KeyX', keyCode: 120, charCode: 120, which: 120, bubbles: true, cancelable: true }))
+            results.push(await parsed)
+            await sleep(100)
+        }
+        render.dispose()
+        buffer.write = write
+        t.sendInput('\\x15')
+        if (results.filter(Boolean).length < 4) throw new Error(JSON.stringify(results))
+        return true`],
     ['A terminal opens in the folder asked for', `const t = await open('/private/tmp'); return run(t, 'pwd', '/private/tmp')`],
     ['A folder that does not exist is ignored', `const t = await open('/no/such/folder'); return run(t, 'echo started', 'started')`],
     ['Paste reads the clipboard', `
@@ -109,6 +180,10 @@ const checks = [
         if (!process.kill(pid, 0)) return false
         app.closeTab(holder(t), false)
         return until(() => { try { process.kill(pid, 0); return false } catch (e) { return e.code === 'ESRCH' } })`],
+    ['Typing exit closes the tab, also with a program left running in the background', `
+        const t = await open()
+        t.sendInput('(sleep 20 &); exit\\r')
+        return until(() => !holder(t), 5000)`],
     ['Splitting starts a second shell', `
         const t = await open(); const split = holder(t)
         await split.splitTab(t, 'r')
@@ -271,7 +346,47 @@ const checks = [
         await invoke('window_set_opacity', { opacity: 1 })
         await invoke('window_set_dark_mode', { mode: 'auto' })
         return true`],
+    ["The page draws at the screen's full frame rate, not WebKit's usual 60 fps", `
+        const { invoke } = window.require('@tauri-apps/api/core')
+        const rate = await invoke('window_frame_rate')
+        const times = await new Promise(resolve => { const t = []; const frame = n => { t.push(n); t.length < 121 ? requestAnimationFrame(frame) : resolve(t) }; requestAnimationFrame(frame) })
+        const gaps = times.slice(1).map((n, i) => n - times[i]).sort((a, b) => a - b)
+        const fps = Math.round(1000 / gaps[gaps.length >> 1])
+        if (rate.limited !== false || (rate.screen > 60 && fps < rate.screen * 0.8)) throw new Error(JSON.stringify({ ...rate, fps }))
+        return true`],
+    ['Export to file saves the terminal as text, scrollback included', `
+        const t = await open()
+        await run(t, 'seq 1 300 | sed s/^/line-/; echo export-$((6*7))', 'export-42')
+        const menu = window.tabby.get(window.require('tabby-terminal').TerminalContextMenuItemProvider)
+            .find(p => p.constructor.name === 'ExportTerminalContextMenu')
+        const items = await menu.getItems(t)
+        const file = ${JSON.stringify(path.join(dataDir, 'export.txt'))}
+        await menu.exportTo(t, file)
+        const text = await window.require('fs').promises.readFile(file, 'utf-8')
+        return items[0].label === 'Export to file' && text.includes('line-1\\n') && text.includes('line-300') && text.includes('export-42')`],
     ['Settings open', `app.openNewTabRaw({ type: window.require('tabby-settings').SettingsTabComponent }); return until(() => app.activeTab?.constructor?.name === 'SettingsTabComponent')`],
+    ['Every Settings page opens without errors', `
+        // (Tabby's own Config sync page asks for the synced configs even with no sync server set, and fails:
+        // configSyncSettingsTab.component.ts, ngOnInit)
+        const tabbysOwn = /configSync\.host\.endsWith/
+        const errors = [], consoleError = console.error
+        console.error = (...args) => {
+            const text = args.map(String).join(' ')
+            if (!tabbysOwn.test(text)) errors.push(text.slice(0, 200))
+            consoleError(...args)
+        }
+        try {
+            app.openNewTabRaw({ type: window.require('tabby-settings').SettingsTabComponent })
+            const links = await until(() => { const l = [...document.querySelectorAll('.nav-pills .nav-link')]; return l.length > 5 && l })
+            for (const link of links) {
+                link.click()
+                await sleep(300)
+            }
+            if (errors.length) throw new Error(errors.join(' | '))
+            return links.length
+        } finally {
+            console.error = consoleError
+        }`],
     ['Settings are saved', `const config = window.tabby.get(core.ConfigService); config.store.terminal.fontSize = 17; await config.save(); return true`],
 ]
 
@@ -281,6 +396,9 @@ try {
         throw new Error('the app did not start')
     }
     for (const [name, code, before] of checks) {
+        if (only && !new RegExp(only, 'i').test(name)) {
+            continue
+        }
         try {
             before?.()
             const ok = await evaluate(prelude + code)
@@ -291,9 +409,100 @@ try {
             failed++
         }
     }
+    if (only) {
+        throw null
+    }
     const saved = fs.readFileSync(path.join(dataDir, 'config.yaml'), 'utf-8').includes('fontSize: 17')
     console.log(`${saved ? 'ok  ' : 'FAIL'} The config file has the change`)
     failed += saved ? 0 : 1
+
+    // New Window: a second window with its own tabs that shares the settings, then closed again.
+    let second = false
+    try {
+        const label = await evaluate(prelude + `
+            window.tabby.get(core.HostAppService).newWindow()
+            const { getAllWindows } = window.require('@tauri-apps/api/window')
+            return until(async () => (await getAllWindows()).map(w => w.label).find(l => l !== 'main'))`)
+        let up = false
+        for (let i = 0; i < 300 && !up; i++) {
+            await sleep(100)
+            up = await evaluate('return !!window.tabby', label).catch(() => false)
+        }
+        const bootstrap = await evaluate(`const b = window.tabby.get(window.require('tabby-core').BOOTSTRAP_DATA); return [b.isMainWindow, b.windowID]`, label)
+        await evaluate(prelude + `const config = window.tabby.get(core.ConfigService); config.store.terminal.fontSize = 19; await config.save(); return true`)
+        const shared = await evaluate(prelude + `return until(() => window.tabby.get(core.ConfigService).store.terminal.fontSize === 19)`, label)
+        const ran = await evaluate(prelude + `const t = await open(); return run(t, 'echo window-$((6*7))', 'window-42')`, label)
+        const dockItem = await evaluate(`const { invoke } = window.require('@tauri-apps/api/core'); return (await invoke('dock_menu_state')).items.some(i => i.id === 'new-window')`)
+        const fullRate = await evaluate(`return (await window.require('@tauri-apps/api/core').invoke('window_frame_rate')).limited === false`, label)
+        await evaluate(`window.require('@tauri-apps/api/window').getCurrentWindow().destroy(); return true`, label).catch(() => null)
+        await sleep(500)
+        const mainAlive = await evaluate('return !!window.tabby')
+        second = up && bootstrap[0] === false && bootstrap[1] > 1 && shared && ran && dockItem && fullRate && mainAlive
+        if (!second) {
+            console.log(`     (${JSON.stringify({ label, up, bootstrap, shared, ran, dockItem, fullRate, mainAlive })})`)
+        }
+    } catch (error) {
+        console.log(`     (${error.message.split('\n')[0]})`)
+    }
+    console.log(`${second ? 'ok  ' : 'FAIL'} New Window opens a second window that shares the settings, and closes again`)
+    failed += second ? 0 : 1
+
+    // Closing tabs gives their memory back: WebKit is asked to collect garbage once tabs stop closing.
+    let freed = false
+    try {
+        const pid = (await evaluate(`return window.require('@tauri-apps/api/core').invoke('webview_pids')`)).web
+        const footprint = () => {
+            const m = /Footprint: ([\d.]+) (KB|MB|GB)/.exec(execFileSync('footprint', [String(pid)], { encoding: 'utf-8' }))
+            return Math.round(Number(m[1]) * { KB: 1 / 1024, MB: 1, GB: 1024 }[m[2]])
+        }
+        const before = footprint()
+        await evaluate(prelude + `
+            window.filled = []
+            for (let i = 0; i < 6; i++) {
+                const t = await open()
+                await run(t, "seq 1 30000 | sed 's/^/scrollback line /'; echo fill-don''e-" + i, 'fill-done-' + i)
+                window.filled.push(t)
+            }
+            return true`)
+        const full = footprint()
+        await evaluate(prelude + `for (const t of window.filled) await app.closeTab(holder(t), false); window.filled = null; return true`)
+        await sleep(5000)
+        const closed = footprint()
+        freed = full - before > 150 && closed - before < (full - before) / 2
+        if (!freed) {
+            console.log(`     (${before} MB, ${full} MB with six full tabs, ${closed} MB 5 s after closing them)`)
+        }
+    } catch (error) {
+        console.log(`     (${error.message.split('\n')[0]})`)
+    }
+    console.log(`${freed ? 'ok  ' : 'FAIL'} Closing tabs gives their memory back`)
+    failed += freed ? 0 : 1
+
+    // Reloading the page keeps the terminals: the new page takes over their shells (Tabby's tab recovery).
+    let reloaded = false
+    try {
+        await evaluate(prelude + `
+            const t = await open()
+            await run(t, 'export TT_RELOAD=kept-$((6*7))', 'TT_RELOAD')
+            for (const tab of app.tabs.filter(x => x !== holder(t))) {
+                await app.closeTab(tab, false)
+            }
+            await window.tabby.get(core.TabRecoveryService).saveTabs(app.tabs)
+            setTimeout(() => location.reload(), 100)
+            return true`)
+        await sleep(1000)
+        if (!await booted()) {
+            throw new Error('the page did not come back')
+        }
+        reloaded = await evaluate(prelude + `
+            const tab = await until(() => app.tabs.find(x => x.getAllTabs))
+            const t = await ready(tab.getAllTabs ? tab.getAllTabs()[0] : tab)
+            return run(t, 'echo $TT_RELOAD', 'kept-42')`)
+    } catch (error) {
+        console.log(`     (${error.message.split('\n')[0]})`)
+    }
+    console.log(`${reloaded ? 'ok  ' : 'FAIL'} A terminal keeps its shell through a page reload`)
+    failed += reloaded ? 0 : 1
 
     // Quit goes through Tabby's close flow and the app exits; started again, the window has the size it was quit at.
     let restored = false
@@ -324,9 +533,41 @@ try {
     }
     console.log(`${restored ? 'ok  ' : 'FAIL'} Quit closes the app through Tabby, and it reopens at the size it was quit at`)
     failed += restored ? 0 : 1
+
+    // First launch with Tabby installed (a fake Tabby folder here): "Import from Tabby" starts from a copy of its
+    // settings, "Start fresh" from Tabby's defaults; Tabby's file stays as it was.
+    const tabbyDir = path.join(dataDir, 'fake-tabby')
+    fs.mkdirSync(tabbyDir)
+    const tabbySettings = 'version: 1\nterminal:\n  fontSize: 23\n'
+    fs.writeFileSync(path.join(tabbyDir, 'config.yaml'), tabbySettings)
+    for (const answer of ['import', 'fresh']) {
+        let ok = false
+        try {
+            app.kill('SIGKILL')
+            await sleep(500)
+            const dir = path.join(dataDir, `first-launch-${answer}`)
+            fs.mkdirSync(dir)
+            app = start(dir, { TABBI_IMPORT_FROM: tabbyDir, TABBI_IMPORT_ANSWER: answer })
+            if (!await booted()) {
+                throw new Error('the app did not start')
+            }
+            const fontSize = await evaluate(prelude + `const config = window.tabby.get(core.ConfigService); await until(() => config.store?.terminal); return config.store.terminal.fontSize`)
+            ok = (answer === 'import' ? fontSize === 23 : fontSize !== 23) && fs.existsSync(path.join(dir, 'config.yaml'))
+                && fs.readFileSync(path.join(tabbyDir, 'config.yaml'), 'utf-8') === tabbySettings
+            if (!ok) {
+                console.log(`     (font size ${fontSize})`)
+            }
+        } catch (error) {
+            console.log(`     (${error.message.split('\n')[0]})`)
+        }
+        console.log(`${ok ? 'ok  ' : 'FAIL'} First launch, ${answer === 'import' ? '"Import from Tabby": starts from Tabby\'s settings' : '"Start fresh": starts from the defaults'}, Tabby's file unchanged`)
+        failed += ok ? 0 : 1
+    }
 } catch (error) {
-    console.log(`FAIL ${error.message}`)
-    failed++
+    if (error !== null) {
+        console.log(`FAIL ${error.message}`)
+        failed++
+    }
 } finally {
     app.kill('SIGKILL')
     sshd.kill('SIGKILL')
@@ -334,8 +575,7 @@ try {
     fs.rmSync(agentSocket, { force: true })
 }
 // The test's own web storage (see debug::web_store in src-tauri/src/debug.rs)
-const store = /web storage ([0-9A-F-]{36})/.exec(fs.readFileSync(log, 'utf-8'))?.[1]
-if (store) {
+for (const [, store] of fs.readFileSync(log, 'utf-8').matchAll(/web storage ([0-9A-F-]{36})/g)) {
     fs.rmSync(path.join(os.homedir(), 'Library/WebKit/io.github.meanaverage.tabbi/WebsiteDataStore', store.toLowerCase()), { recursive: true, force: true })
 }
 const pageErrors = fs.readFileSync(log, 'utf-8').split('\n').filter(l => /^page (error|uncaught|unhandled)/.test(l))

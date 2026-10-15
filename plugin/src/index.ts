@@ -3,8 +3,8 @@ import { CommonModule } from '@angular/common'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow, ProgressBarStatus } from '@tauri-apps/api/window'
 import { AppService, ConfigProvider, ConfigService, DockingService, FileProvider, HostAppService, HostWindowService, HotkeyProvider, LogService, Platform, PlatformService, Theme, ThemesService, UpdaterService } from 'tabby-core'
-import { TerminalDecorator } from 'tabby-terminal'
-import { auditTime } from 'rxjs'
+import { TerminalContextMenuItemProvider, TerminalDecorator } from 'tabby-terminal'
+import { auditTime, debounceTime } from 'rxjs'
 
 import { TauriPlatformService } from './platform'
 import { ConsoleLogService } from './services/log.service'
@@ -20,6 +20,8 @@ import { POSIXShellsProvider } from './shells/posix'
 import { TauriConfigProvider } from './config'
 import { TauriHotkeyProvider } from './hotkeys'
 import { PathDropDecorator } from './pathDrop'
+import { EchoNowDecorator } from './echoNow'
+import { ExportTerminalContextMenu } from './terminalContextMenu'
 import { TauriDockingService } from './services/docking.service'
 import { DockMenuService } from './services/dockMenu.service'
 import { TauriDragDropService } from './services/dragDrop.service'
@@ -42,6 +44,8 @@ import './styles.scss'
         { provide: ConfigProvider, useClass: TauriConfigProvider, multi: true },
         { provide: HotkeyProvider, useClass: TauriHotkeyProvider, multi: true },
         { provide: TerminalDecorator, useClass: PathDropDecorator, multi: true },
+        { provide: TerminalDecorator, useClass: EchoNowDecorator, multi: true },
+        { provide: TerminalContextMenuItemProvider, useClass: ExportTerminalContextMenu, multi: true },
         { provide: ShellProvider, useClass: MacOSDefaultShellProvider, multi: true },
         { provide: ShellProvider, useClass: POSIXShellsProvider, multi: true },
     ],
@@ -89,6 +93,10 @@ export default class TauriModule {
         })
         getCurrentWindow().listen('host:toggle-window', () => zone.run(() => docking.toggleWindow()))
 
+        // WebKit collects garbage only under allocation pressure, so closed tabs' terminals (their scrollback) would stay
+        // in memory for a long while: ask it to once tabs stop closing (src-tauri/src/window.rs).
+        app.tabClosed$.pipe(debounceTime(2000)).subscribe(() => invoke('webview_collect_garbage'))
+
         // A tab's progress (a transfer, a long command reporting it) on the Dock icon.
         let lastProgress: number|null = null
         app.tabOpened$.subscribe(tab => {
@@ -132,3 +140,4 @@ export default class TauriModule {
 }
 
 export { startsWindowDrag } from './windowDrag'
+export { ExportTerminalContextMenu } from './terminalContextMenu'

@@ -10,9 +10,11 @@ import 'rxjs'
 import '../../app/src/global.scss'
 import '../../app/src/toastr.scss'
 
+import * as angularCore from '@angular/core'
 import { enableProdMode } from '@angular/core'
 import { platformBrowserDynamic } from '@angular/platform-browser-dynamic'
 import { invoke } from '@tauri-apps/api/core'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import * as yaml from 'js-yaml'
 
 import { getRootModule } from '../../app/src/app.module'
@@ -35,12 +37,15 @@ location.hash = ''
 
 async function start (): Promise<void> {
     const info = await invoke<HostInfo>('host_info')
+    const label = getCurrentWindow().label
     window['tabbyTauriHost'] = info
     Object.assign(process, { env: info.env, platform: info.platform, arch: info.arch })
     if (!info.debug) {
         enableProdMode()
     }
 
+    // The first launch asks whether to start from Tabby's settings (src-tauri/src/config.rs).
+    await invoke('config_first_launch')
     let config = {}
     try {
         config = yaml.load(await invoke<string>('config_read')) as any ?? {}
@@ -68,8 +73,9 @@ async function start (): Promise<void> {
     const bootstrapData: BootstrapData = {
         config,
         executable: info.executable,
-        isMainWindow: true,
-        windowID: 1,
+        // The first window is "main", the others "main-2", "main-3"… (src-tauri/src/windows.rs)
+        isMainWindow: label === 'main',
+        windowID: label === 'main' ? 1 : Number(label.split('-')[1]),
         installedPlugins,
         userPluginsPath: '',
     }
@@ -86,10 +92,12 @@ async function start (): Promise<void> {
     }
     // Tabby's ConfigService looks the plugin modules up here, as the Electron build leaves them.
     window['pluginModules'] = pluginModules
+    // Tabby relies on zone.js to notice changes; Angular 21 starts without it unless asked (the function exists from 16 on).
+    const provideZoneChangeDetection = (angularCore as any).provideZoneChangeDetection
     // For tests (scripts/eval.mjs): services are `tabby.get(require('tabby-core').AppService)`.
     const moduleRef = await platformBrowserDynamic([
         { provide: BOOTSTRAP_DATA, useValue: bootstrapData },
-    ]).bootstrapModule(getRootModule(pluginModules))
+    ]).bootstrapModule(getRootModule(pluginModules), provideZoneChangeDetection ? { applicationProviders: [provideZoneChangeDetection()] } as any : {})
     window['tabby'] = moduleRef.injector
 }
 

@@ -1,4 +1,5 @@
 import { Injectable, Injector, NgZone } from '@angular/core'
+import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { HostAppService, Platform } from 'tabby-core'
 
@@ -19,10 +20,12 @@ export class TauriHostApp extends HostAppService {
         super(injector)
         // The app menu's Preferences… (src-tauri/src/menu.rs)
         getCurrentWindow().listen('host:preferences-menu', () => zone.run(() => this.settingsUIRequest.next()))
+        // Another window saved the settings (src-tauri/src/config.rs): Tabby loads them again.
+        getCurrentWindow().listen('host:config-change', () => zone.run(() => this.configChangeBroadcast.next()))
     }
 
     newWindow (): void {
-        throw new Error('Not implemented')
+        invoke('window_new')
     }
 
     relaunch (): void {
