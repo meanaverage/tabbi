@@ -31,9 +31,20 @@ register('mz/fs', nodeFs.mzFs)
 register('any-promise', Promise)
 register('tls', {})
 register('module', { globalPaths: [], prototype: { require: window['require'] } })
-register('http', { Agent: class {}, request: {} })
-register('https', { Agent: class {}, request: {} })
-register('querystring', {})
+// Tabby's analytics (tabby-core's HomeBaseService, through the Node mixpanel library) would report this app's launches
+// as Tabby's: requests go nowhere here. They have to be callable, though: with them missing, HomeBaseService fails to
+// construct whenever analytics is on and the welcome tab off (any config past the first launch), and with Angular 21
+// everything that needs it afterwards, Settings included, fails too.
+const noRequest = () => {
+    const request = { on: () => request, write: () => true, end: () => request, setTimeout: () => request, destroy: () => request }
+    return request
+}
+register('http', { Agent: class {}, request: noRequest })
+register('https', { Agent: class {}, request: noRequest })
+register('querystring', {
+    stringify: (params: Record<string, any>) => new URLSearchParams(Object.entries(params ?? {}).map(([k, v]) => [k, String(v)])).toString(),
+    parse: (text: string) => Object.fromEntries(new URLSearchParams(text)),
+})
 register('tty', { isatty: () => false })
 register('child_process', {})
 register('readable-stream', require('stream-browserify'))
