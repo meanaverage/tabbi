@@ -38,6 +38,7 @@ thiserror = "2"
 [target.'cfg(target_os = "macos")'.dependencies]
 libproc = "0.14"
 objc2 = "0.6"
+block2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSWindow", "NSView", "NSButton", "NSControl", "NSMenu", "NSMenuItem", "NSRunningApplication", "objc2-core-foundation"] }
 core-text = "22"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry", "NSString", "objc2-core-foundation"] }

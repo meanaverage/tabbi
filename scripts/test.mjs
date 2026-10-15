@@ -286,6 +286,17 @@ const checks = [
         await invoke('window_set_traffic_light_position', { x: 14, y: 11 }); await sleep(200)
         if (seen.join(' ') !== '14,11 14,11 14,11 20,16') throw new Error(seen.join(' '))
         return true`],
+    ['The Mac window buttons stay put while the window is resized: every size is drawn with them in place', `
+        const { invoke } = window.require('@tauri-apps/api/core')
+        const seen = (await invoke('window_traffic_light_resize_steps', { steps: 20 })).map(p => p.map(v => Math.round(v)).join(','))
+        const off = seen.filter(p => p !== '14,11')
+        if (off.length) throw new Error(off.length + ' of ' + seen.length + ' drawn elsewhere: ' + [...new Set(off)].join(' '))
+        // (and keeping them there isn't a tug of war with macOS: nothing moves them while nothing happens)
+        await sleep(500)
+        const before = await invoke('window_traffic_light_moves'); await sleep(1500)
+        const idle = await invoke('window_traffic_light_moves') - before
+        if (idle) throw new Error('moved ' + idle + ' times while idle')
+        return true`],
     ['Fonts: Settings lists the installed fonts', `
         const fonts = await window.tabby.get(core.PlatformService).listFonts()
         return fonts.length > 20 && fonts.includes('Menlo')`],
@@ -495,8 +506,9 @@ try {
             throw new Error('the page did not come back')
         }
         reloaded = await evaluate(prelude + `
+            // (the split tab comes back first, its terminal a moment later)
             const tab = await until(() => app.tabs.find(x => x.getAllTabs))
-            const t = await ready(tab.getAllTabs ? tab.getAllTabs()[0] : tab)
+            const t = await ready(await until(() => tab.getAllTabs()[0]))
             return run(t, 'echo $TT_RELOAD', 'kept-42')`)
     } catch (error) {
         console.log(`     (${error.message.split('\n')[0]})`)
