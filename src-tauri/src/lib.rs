@@ -84,6 +84,8 @@ pub fn run() {
             traffic_lights::window_set_traffic_light_position,
             traffic_lights::window_set_title,
             traffic_lights::window_traffic_light_frame,
+            traffic_lights::window_traffic_light_resize_steps,
+            traffic_lights::window_traffic_light_moves,
             clipboard::clipboard_read,
             clipboard::clipboard_write,
             config::config_read,
