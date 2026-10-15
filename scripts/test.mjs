@@ -563,6 +563,35 @@ try {
         console.log(`${ok ? 'ok  ' : 'FAIL'} First launch, ${answer === 'import' ? '"Import from Tabby": starts from Tabby\'s settings' : '"Start fresh": starts from the defaults'}, Tabby's file unchanged`)
         failed += ok ? 0 : 1
     }
+
+    // A later launch: a settings file with the welcome tab done and analytics left on (Tabby's default). Tabby's
+    // analytics then starts with the app; it has to start without errors (and send nothing), and Settings must open.
+    let returning = false
+    try {
+        app.kill('SIGKILL')
+        await sleep(500)
+        const dir = path.join(dataDir, 'returning')
+        fs.mkdirSync(dir)
+        fs.writeFileSync(path.join(dir, 'config.yaml'), 'version: 8\nenableWelcomeTab: false\nenableAnalytics: true\n')
+        const errorsBefore = fs.readFileSync(log, 'utf-8').split('\n').filter(l => /^page (error|uncaught|unhandled)/.test(l)).length
+        app = start(dir)
+        if (!await booted()) {
+            throw new Error('the app did not start')
+        }
+        const opened = await evaluate(prelude + `
+            window.tabby.get(core.HomeBaseService)
+            await zone.run(() => app.openNewTabRaw({ type: window.require('tabby-settings').SettingsTabComponent }))
+            return until(() => app.activeTab?.constructor?.name === 'SettingsTabComponent')`)
+        const errors = fs.readFileSync(log, 'utf-8').split('\n').filter(l => /^page (error|uncaught|unhandled)/.test(l)).slice(errorsBefore)
+        returning = opened && errors.length === 0
+        if (!returning) {
+            console.log(`     (${errors.slice(0, 2).join(' | ').slice(0, 300)})`)
+        }
+    } catch (error) {
+        console.log(`     (${error.message.split('\n')[0]})`)
+    }
+    console.log(`${returning ? 'ok  ' : 'FAIL'} A later launch (welcome tab done, analytics on) starts without errors, and Settings opens`)
+    failed += returning ? 0 : 1
 } catch (error) {
     if (error !== null) {
         console.log(`FAIL ${error.message}`)
