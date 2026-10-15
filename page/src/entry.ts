@@ -10,6 +10,7 @@ import 'rxjs'
 import '../../app/src/global.scss'
 import '../../app/src/toastr.scss'
 
+import * as angularCore from '@angular/core'
 import { enableProdMode } from '@angular/core'
 import { platformBrowserDynamic } from '@angular/platform-browser-dynamic'
 import { invoke } from '@tauri-apps/api/core'
@@ -91,10 +92,12 @@ async function start (): Promise<void> {
     }
     // Tabby's ConfigService looks the plugin modules up here, as the Electron build leaves them.
     window['pluginModules'] = pluginModules
+    // Tabby relies on zone.js to notice changes; Angular 21 starts without it unless asked (the function exists from 16 on).
+    const provideZoneChangeDetection = (angularCore as any).provideZoneChangeDetection
     // For tests (scripts/eval.mjs): services are `tabby.get(require('tabby-core').AppService)`.
     const moduleRef = await platformBrowserDynamic([
         { provide: BOOTSTRAP_DATA, useValue: bootstrapData },
-    ]).bootstrapModule(getRootModule(pluginModules))
+    ]).bootstrapModule(getRootModule(pluginModules), provideZoneChangeDetection ? { applicationProviders: [provideZoneChangeDetection()] } as any : {})
     window['tabby'] = moduleRef.injector
 }
 

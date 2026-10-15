@@ -161,7 +161,7 @@ export class TauriPlatformService extends PlatformService {
 }
 
 class HTMLFileDownload extends FileDownload {
-    private buffers: Uint8Array[] = []
+    private buffers: BlobPart[] = []
 
     constructor (
         private name: string,
