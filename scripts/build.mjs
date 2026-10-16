@@ -27,7 +27,7 @@ const TABBY_PLUGINS = [
     'tabby-local',
     'tabby-linkifier',
 ]
-const PLUGINS = [...TABBY_PLUGINS, 'tabby-tauri']
+const PLUGINS = [...TABBY_PLUGINS, 'tabby-tauri', 'tabby-rdp']
 
 const args = process.argv.slice(2)
 const debug = args.includes('--debug')
@@ -61,6 +61,8 @@ need('yarn', 'install Node.js 22 or newer, then run `npm install -g yarn`')
 need('rustup', 'install Rust from https://rustup.rs')
 need('rsync', 'it comes with macOS')
 
+run('node', [path.join(root, 'scripts/check-rdp-assets.mjs')], root)
+
 step(`Copying Tabby from ${tabby}`)
 fs.mkdirSync(work, { recursive: true })
 // --delete keeps the copy identical to Tabby; what's excluded (installed packages, build output, our two parts)
@@ -68,10 +70,11 @@ fs.mkdirSync(work, { recursive: true })
 run('rsync', [
     '-a', '--delete',
     '--exclude', '.git', '--exclude', 'node_modules', '--exclude', '/*/dist/', '--exclude', '/*/typings/',
-    '--exclude', '/tabby-tauri/', '--exclude', '/tauri-page/',
+    '--exclude', '/tabby-rdp/', '--exclude', '/tabby-tauri/', '--exclude', '/tauri-page/',
     `${tabby}/`, `${work}/`,
 ], root)
 run('rsync', ['-a', '--delete', '--exclude', 'node_modules', '--exclude', 'dist', `${root}/plugin/`, `${work}/tabby-tauri/`], root)
+run('rsync', ['-a', '--delete', '--exclude', 'node_modules', '--exclude', 'dist', `${root}/rdp-plugin/`, `${work}/tabby-rdp/`], root)
 run('rsync', ['-a', '--delete', '--exclude', 'node_modules', '--exclude', 'dist', `${root}/page/`, `${work}/tauri-page/`], root)
 
 step('Installing packages')
@@ -96,7 +99,7 @@ for (const name of [...PLUGINS, 'tauri-page']) {
     yarnInstall(name)
 }
 // The lock files for our two parts, the first time they're made, go back into this project.
-for (const [from, to] of [['tabby-tauri', 'plugin'], ['tauri-page', 'page']]) {
+for (const [from, to] of [['tabby-rdp', 'rdp-plugin'], ['tabby-tauri', 'plugin'], ['tauri-page', 'page']]) {
     const lock = path.join(work, from, 'yarn.lock')
     if (fs.existsSync(lock) && !fs.existsSync(path.join(root, to, 'yarn.lock'))) {
         fs.copyFileSync(lock, path.join(root, to, 'yarn.lock'))
@@ -114,7 +117,7 @@ const requireFromWork = createRequire(path.join(work, 'package.json'))
 const webpack = requireFromWork('webpack')
 async function build (configPath) {
     const config = (await import(url.pathToFileURL(configPath).href)).default()
-    if (!process.env.TABBY_DEV) {
+    if (!process.env.TABBY_DEV && !configPath.includes('/tabby-rdp/')) {
         lighten(config)
     }
     const stats = await promisify(webpack)(config)
@@ -161,6 +164,10 @@ for (const name of PLUGINS) {
     fs.mkdirSync(target, { recursive: true })
     fs.copyFileSync(path.join(work, name, 'package.json'), path.join(target, 'package.json'))
     fs.cpSync(path.join(work, name, 'dist'), path.join(target, 'dist'), { recursive: true })
+    if (name === 'tabby-rdp') {
+        fs.cpSync(path.join(work, name, 'vendor'), path.join(target, 'vendor'), { recursive: true })
+        fs.copyFileSync(path.join(work, name, 'LICENSE'), path.join(target, 'LICENSE'))
+    }
 }
 fs.writeFileSync(path.join(page, 'plugins.json'), JSON.stringify(PLUGINS, null, 2) + '\n')
 
@@ -179,7 +186,7 @@ const icon = path.join(tabby, 'build/icons/Icon-MacOS-512x512@2x.png')
 run(path.join(root, 'node_modules/.bin/tauri'), ['icon', icon, '-o', path.join(root, 'src-tauri/icons')], root)
 run(path.join(root, 'node_modules/.bin/tauri'), ['build', '--bundles', 'app', ...debug ? ['--debug'] : []], root)
 
-const bundle = path.join(root, 'src-tauri/target', debug ? 'debug' : 'release', 'bundle/macos/tabbi.app')
+const bundle = path.join(process.env.CARGO_TARGET_DIR ? path.resolve(root, process.env.CARGO_TARGET_DIR) : path.join(root, 'src-tauri/target'), debug ? 'debug' : 'release', 'bundle/macos/tabbi.app')
 const out = path.join(root, 'out/tabbi.app')
 fs.rmSync(out, { recursive: true, force: true })
 fs.mkdirSync(path.dirname(out), { recursive: true })

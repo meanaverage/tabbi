@@ -13,6 +13,7 @@ pub fn handle<R: Runtime>(ctx: UriSchemeContext<'_, R>, request: Request<Vec<u8>
     let args: Value = serde_json::from_slice(request.body()).unwrap_or(Value::Null);
     let path = args["path"].as_str().unwrap_or_default();
     let result = match call.as_str() {
+        "files" => ctx.app_handle().state::<crate::files::Files>().sync_call(ctx.webview_label(), args.clone()),
         "stat" => crate::fs::stat(path, args["lstat"].as_bool().unwrap_or(false))
             .and_then(|s| serde_json::to_value(s).map_err(|e| e.to_string())),
         "read_file" => std::fs::read(path)
@@ -24,6 +25,7 @@ pub fn handle<R: Runtime>(ctx: UriSchemeContext<'_, R>, request: Request<Vec<u8>
         "readdir" => std::fs::read_dir(path)
             .map(|dir| json!(dir.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).collect::<Vec<_>>()))
             .map_err(|e| crate::fs::node_error(e, "scandir", path)),
+        "clipboard_files" => Ok(json!(ctx.app_handle().state::<crate::clipboard::Clipboard>().file_paths())),
         "clipboard_read" => Ok(json!(ctx.app_handle().state::<crate::clipboard::Clipboard>().read_text())),
         "process_alive" => Ok(json!(process_alive(args["pid"].as_i64().unwrap_or(0)))),
         "process_kill" => Ok(json!(process_kill(args["pid"].as_i64().unwrap_or(0), args["signal"].as_str().unwrap_or("SIGTERM")))),

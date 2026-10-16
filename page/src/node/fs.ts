@@ -35,7 +35,7 @@ class Stats {
     constructor (raw: RawStat) {
         this.raw = raw
         Object.assign(this, {
-            size: raw.size, mode: raw.mode, uid: raw.uid, gid: raw.gid,
+            size: raw.size, dev: (raw as any).dev, ino: (raw as any).ino, mode: raw.mode, uid: raw.uid, gid: raw.gid,
             mtimeMs: raw.mtimeMs, atimeMs: raw.atimeMs, ctimeMs: raw.ctimeMs, birthtimeMs: raw.birthtimeMs,
         })
         this.mtime = new Date(raw.mtimeMs)
@@ -85,7 +85,28 @@ function toBytes (data: any, encoding?: string|null): Uint8Array {
     return Buffer.from(String(data))
 }
 
+const fileCall = (args: any) => call<any>('files_call', { args })
+class FileHandle {
+    constructor (readonly fd: number) { }
+    async stat () { return new Stats(await fileCall({ op: 'stat', handle: this.fd })) }
+    async read (buffer: Buffer, offset: number, length: number, position: number | null) {
+        const data = Buffer.from(await fileCall({ op: 'read', handle: this.fd, length, offset: position }), 'base64')
+        data.copy(buffer, offset)
+        return { buffer, bytesRead: data.length }
+    }
+    async writeFile (data: Uint8Array) {
+        // Small IPC messages; the native file stays open and errors keep partial downloads from finalizing.
+        const bytes = toBytes(data)
+        for (let offset = 0; offset < bytes.length; offset += 1024 * 1024) {
+            await fileCall({ op: 'write', handle: this.fd, data: Buffer.from(bytes.subarray(offset, offset + 1024 * 1024)).toString('base64') })
+        }
+    }
+    appendFile (data: Uint8Array) { return this.writeFile(data) }
+    async close () { await fileCall({ op: 'close', handle: this.fd }) }
+}
 const promises = {
+    async open (path: any, flags: string | number, mode?: number) { return new FileHandle(await fileCall({ op: 'open', path: toPath(path), flags, mode })) },
+    async mkdtemp (prefix: any) { return fileCall({ op: 'mkdtemp', path: toPath(prefix) }) },
     async stat (path: any): Promise<Stats> {
         return new Stats(await call<RawStat>('fs_stat', { path: toPath(path) }))
     },
@@ -109,6 +130,11 @@ const promises = {
         return encoding ? bytes.toString(encoding as BufferEncoding) : bytes
     },
     async writeFile (path: any, data: any, options?: any): Promise<void> {
+        if (options?.flag === 'wx') {
+            const handle = await promises.open(path, 'wx', options?.mode)
+            try { await handle.writeFile(toBytes(data, encodingOf(options))) } finally { await handle.close() }
+            return
+        }
         const headers: Record<string, string> = { path: encodeURIComponent(toPath(path)) }
         if (options?.mode) {
             headers.mode = options.mode.toString(8)
@@ -146,7 +172,8 @@ const promises = {
     async chmod (path: any, mode: number|string): Promise<void> {
         await call('fs_chmod', { path: toPath(path), mode: typeof mode === 'string' ? parseInt(mode, 8) : mode })
     },
-    async copyFile (from: any, to: any): Promise<void> {
+    async copyFile (from: any, to: any, flags = 0): Promise<void> {
+        if (flags & 1) { await fileCall({ op: 'copy', path: toPath(from), to: toPath(to) }); return }
         await promises.writeFile(to, await promises.readFile(from))
     },
 }
@@ -168,7 +195,7 @@ const notSync = (name: string) => () => {
     throw new Error(`fs.${name} is not available in this app (no synchronous file access); use the async version`)
 }
 
-const constants = { F_OK: 0, R_OK: 4, W_OK: 2, X_OK: 1, O_RDONLY: 0, O_WRONLY: 1, O_RDWR: 2, O_CREAT: 0o100, O_TRUNC: 0o1000, O_APPEND: 0o2000, S_IFMT: 0o170000, S_IFREG: 0o100000, S_IFDIR: 0o40000, S_IFLNK: 0o120000 }
+const constants = { F_OK: 0, R_OK: 4, W_OK: 2, X_OK: 1, O_RDONLY: 0, O_NOFOLLOW: 0o400000, O_NONBLOCK: 0o4000, COPYFILE_EXCL: 1, O_WRONLY: 1, O_RDWR: 2, O_CREAT: 0o100, O_TRUNC: 0o1000, O_APPEND: 0o2000, S_IFMT: 0o170000, S_IFREG: 0o100000, S_IFDIR: 0o40000, S_IFLNK: 0o120000 }
 
 const callbackFs: Record<string, any> = { constants, Stats, Dirent, promises }
 for (const [name, fn] of Object.entries(promises)) {
@@ -224,3 +251,14 @@ callbackFs.realpathSync = Object.assign((path: any) => syncCall<string>('realpat
 export const fs = callbackFs
 export const fsPromises = { ...promises, constants }
 export const mzFs = callbackFs
+
+// The plugin's synchronous fallback checks the same open file, including its device and inode.
+callbackFs.openSync = (path: any, flags: any, mode?: number) => syncCall('files', { op: 'open', path: toPath(path), flags, mode })
+callbackFs.fstatSync = (handle: number) => new Stats(syncCall('files', { op: 'stat', handle }))
+callbackFs.closeSync = (handle: number) => syncCall('files', { op: 'close', handle })
+callbackFs.readSync = (handle: number, buffer: Buffer, offset: number, length: number, position: number) => {
+    const bytes = Buffer.from(syncCall<string>('files', { op: 'read', handle, offset: position, length }), 'base64')
+    bytes.copy(buffer, offset)
+    return bytes.length
+}
+callbackFs.mkdirSync = (path: any) => syncCall('files', { op: 'mkdir', path: toPath(path) })

@@ -1,0 +1,57 @@
+# vendor/ is IronRDP 9b151c4c2e47c6014e1e8e55909d4180aa8bdb99 with the patches below, built by scripts/build-ironrdp.sh with
+# rustc 1.94.1 (e408947bf 2026-03-25), wasm-pack 0.15.0 (wasm-bindgen 0.2.126, binaryen version_117) and
+# Node.js v26.8.2, on aarch64-apple-darwin. Check from the repository's root: sha256sum -c vendor/SHA256SUMS
+# (or shasum -a 256 -c vendor/SHA256SUMS).
+965bc4a29f18bd6d766fe397c96dbe1483b23607ae8dd5a7458149d3625c2023  ironrdp/BASE_COMMIT
+315f1de9185945c1bf248706353758ef0af9f94a2bcd01d9709454f5da752dca  ironrdp/patches/0001-fix-dvc-drop-data-for-a-channel-that-is-not-open-ins.patch
+637157633fc962bdd4f300477134d42106dc606aaad933f74d70f9f2fc90cecd  ironrdp/patches/0002-fix-web-fit-the-canvas-to-the-host-element-not-the-w.patch
+81b3ea3fd8d339cf982f1dfb10fa765aae0beec9aa1333b2c918c3f57a89eccb  ironrdp/patches/0003-fix-web-dispatch-the-ready-event-after-clipboard-ini.patch
+30c1202263bd6654b2617e787ca3385f15361eb26d809ebc9ad9aef52c7b98cf  ironrdp/patches/0004-fix-rdpsnd-echo-the-Training-PDU-s-wPackSize-in-the-.patch
+f6193b9fcc3d9be6442f7ad906a1a586c842459952ed201dabee0364e6437ae0  ironrdp/patches/0005-feat-web-graphics-pipeline-EGFX-per-connection-and-f.patch
+4b8d33f188be91d478886fd2f1ee58c8ae86ac7594ca682b7b3f54de2fe57839  ironrdp/patches/0006-feat-web-audio-playback-RDPSND-through-an-audioPlayb.patch
+ebe7d796727f9855c32ba1b8d5b5d2429483be54cb6654a130bfb9c57bbab2c1  ironrdp/patches/0007-feat-web-microphone-redirection-AUDIO_INPUT-through-.patch
+8859fbb775635beaef4d558fe8512ad47dac4b9610b31e44fa99987d8d4cbe76  ironrdp/patches/0008-feat-web-H.264-in-the-graphics-pipeline-decoded-by-W.patch
+f597cc1fa3e8c4fce560b55024f6e4f3ea58d469c4f775da7abd0e6555a7c2ef  ironrdp/patches/0009-feat-web-let-the-host-hand-init-the-WebAssembly-modu.patch
+c7f82ac4b382e478a135734e7864ba83bcb2ba715b27cf40b17ad90342a936f3  ironrdp/patches/0010-fix-graphics-read-Progressive-SRL-code-words-as-valu.patch
+92237eed373c3b597fea0dd6e5548052ac13ad34f6b3276d0ce53dd667a1c0d7  ironrdp/patches/0011-feat-web-let-the-host-send-key-events-to-a-session.patch
+4c843f724d8f348297b5d17174c0c2d1dbc611a57f7eb2bb5cba633ebf8c5ba3  ironrdp/patches/0012-fix-web-keep-clipboard-monitoring-and-focus-writes-p.patch
+48e697ea31969259faebc743026f91995b33af1e9cbc6af6970861c7c59c671c  ironrdp/patches/0013-fix-web-sync-the-clipboard-automatically-for-the-foc.patch
+a9029bbb677deb208eda1202daec144b6a9e033fc987480eab4bf8b8e0ac70d6  ironrdp/patches/0014-fix-web-read-H.264-pictures-correctly-where-WebKit-i.patch
+459b08a00dc1e0341e1e80c0dab9b724b952b886964042ebe6ed9d80be5880c4  ironrdp/patches/0015-feat-web-drive-redirection-through-a-JavaScript-file.patch
+d67aa6029edb142daa1e5069fa79ab1917687474a89a61bd221081f204ba8e12  ironrdp/patches/0016-fix-svc-send-chunked-messages-without-CHANNEL_FLAG_S.patch
+35a592496b2c735d78450cf417e16a260143af2490817e57cd6a13b5f5b340c4  ironrdp/patches/0017-perf-web-read-H.264-regions-that-are-far-apart-one-b.patch
+1715a443e12656a5f6ba7646bfecb7e9c4125649c0769822e744b108e68bfb1f  ironrdp/patches/0018-fix-svc-bound-the-reassembly-of-chunked-static-chann.patch
+5928118be28c813dd3a937d809351dde34cbf8b9f1687c224205319744588a89  ironrdp/patches/0019-fix-dvc-bound-the-reassembly-of-fragmented-dynamic-c.patch
+1911fc562afef57b93d19116acfb85ac98784f2b01fb98c6f8f69d637ab1c3ae  ironrdp/patches/0020-fix-web-bound-the-drive-requests-waiting-for-the-fil.patch
+2c861bec8e42f7cc6d5bfafa24aac3b00a68e9c2e37b98e08c79f8ea77ef0544  ironrdp/patches/0025-fix-connector-require-nonce-bound-CredSSP-version-5-.patch
+097ea5fb18d690c0792a63722efdbcff6c3ee1aae4dc6f6d779dabe690284156  ironrdp/patches/0027-fix-cliprdr-cap-the-formats-and-format-names-a-Forma.patch
+35f11dcfb3d3b09359efd08050452cbc0448f2381332fbc16870177e6d7d5d80  ironrdp/patches/0028-fix-web-go-through-a-remote-format-list-once-fetchin.patch
+5d258f721c90dd8a327a4ddbefb1c4ca674102b76c3e27f0b60cc94a943359d6  ironrdp/patches/0031-fix-graphics-egfx-cap-RDP6-planar-images-at-8192-pix.patch
+99bbd5a95db8f511c638873d1beada8863776c3dbe55ea6ca0e6ce410e533ea3  ironrdp/patches/0032-fix-pdu-graphics-decode-ClearCodec-bands-one-V-bar-a.patch
+08a31eb5a9e4f205a9d49ef63e78b9d50bf950e0c4037e747816316666933ad4  ironrdp/patches/0033-fix-graphics-refuse-pointers-larger-than-384x384.patch
+1c685f7d29696f7f52ffd9314394ab4a31a6f5ce19f6b5c41b0aa65e2bc49b95  ironrdp/patches/0034-fix-session-keep-pointers-only-in-the-32-pointer-cac.patch
+71ce56fe6a22512791ed3643da9afbf31f5ed0fcb4010c2a803463f2e5577aea  ironrdp/patches/0035-fix-graphics-cap-the-memory-the-Progressive-decoder-.patch
+e9f46da71a587208e23483441161a4c22352cfa380b22715b37fd189595da62c  ironrdp/patches/0036-fix-graphics-limit-the-tiles-one-Progressive-bitmap-.patch
+7c405811f17eae21f0ce7124a02bb090a3c8a8fcc8f46a40b0b626fd51e91710  ironrdp/patches/0037-fix-pdu-graphics-read-Progressive-bitmap-streams-one.patch
+868eb376e5b48659f174c48d39ec28ff04db26373280d5b56135591aa4d30c8c  ironrdp/patches/0038-fix-graphics-egfx-allocate-the-ClearCodec-image-fall.patch
+8f83041ed062bdf91e6e1c07ba51413c1ac4ed99d8ed7e5928b6c6a9c2ecbc65  ironrdp/patches/0039-fix-pdu-graphics-decode-ClearCodec-residual-subcodec.patch
+a856b1f8cd209f2b9b65f2af23cc26da1d0865198c747c4a947bfd84de013987  ironrdp/patches/0040-fix-graphics-decode-ClearCodec-NSCodec-regions-strai.patch
+c6dbaa82813c7ba99eabaeacdb221a175971b0afd65f75e5ba07795cac9d8412  ironrdp/patches/0041-fix-graphics-bound-how-much-ClearCodec-subcodec-regi.patch
+a285a1ba35dd4d009f7d4f017699ecfe5a73f5259d83c6304e0d8c6f853f02c8  ironrdp/patches/0042-fix-egfx-track-only-the-surfaces-the-compositor-can-.patch
+e9cfa61b65dac322e9c0fe62c1731bd282db2d67f2637458209bc828ecc48952  ironrdp/patches/0043-fix-egfx-bound-the-region-rectangles-of-an-H.264-fra.patch
+fcd90483a5b1453e763af51675994f55a6c13abf456670d0cc430ab209cbe71b  ironrdp/patches/0044-fix-egfx-bound-what-waits-for-the-external-H.264-dec.patch
+65fc06e6dd8e151d6c3a6c8db61de667b304a59709c1ac0c83b07f014f4764a2  ironrdp/patches/0045-fix-egfx-process-the-PDUs-of-a-message-as-they-are-d.patch
+2216173c2a4931253be343afc787437c4cf8e2a268bb4adad82d4a8d3e745b1f  ironrdp/patches/0046-fix-egfx-bound-the-frames-one-message-carries.patch
+f8450921517717d4845160bcad8279678ffbd8dac86c3fa8c9e86626b65175a9  ironrdp/patches/0047-fix-web-bound-the-H.264-the-decoders-hold.patch
+d84a7753a9ef6604534395e2e5169625b4d4f8105c1e506034e90b22c2ade061  ironrdp/patches/0048-fix-web-close-the-H.264-decoders-of-surfaces-that-ar.patch
+c1cbc903a6f4e5b2261fbfc6d5ef6b5381d441e9360d0358d3151415788432c3  ironrdp/patches/0049-fix-web-bound-the-pictures-the-H.264-decoders-read-b.patch
+7cea73065dd42673be02fbea71d86765bd50c5683929b360a6e5b74c1b9f3a91  ironrdp/patches/0050-fix-web-find-the-bounding-box-of-H.264-regions-witho.patch
+2be2e12e2846e15ecb6d319a70346c601fed1e2739122d4a5fd95f438fe9cf1f  ironrdp/patches/0051-fix-web-bound-how-fast-the-H.264-decoders-open.patch
+26c833bd77c828f6068be971d217ed79a1a8ffa51093fd4677a51f12f1a5c0e6  ironrdp/patches/0052-fix-graphics-tighten-history-and-fallible-grid-pointer.patch
+b51d75e037581e272cdeb81d16dd02c87b696b9598ec003acb0810878871ec10  ironrdp/patches/0053-fix-egfx-bound-callback-pixels-readback-count-and-retirement.patch
+f32621b910292284f25a1ac7ca38a01d1561f0c1f0c6e29f71b936140a6e31ed  ironrdp/patches/0054-fix-web-configure-decoder-cap-and-defer-until-keyframe.patch
+08ccf512db2cfe21b16f958eda6fa4b23e052a0c0e91829a4fc2657f8bd8dd4d  vendor/IRONRDP-LICENSE
+ff419e89243b14021c1871bdb4a8c4ee6cbd2c46a469870cd6b37da348f2e5e9  vendor/iron-remote-desktop-rdp.js
+5a6363b9140a5a2abf0218aa39edb38f10445e8d7e9c5a798c321772e1f07c11  vendor/iron-remote-desktop.js
+173ff598bb50290ec7027fbd3eeb1d4f58c03e9372bbb9f1066b8997f587fbc8  vendor/ironrdp_web_bg.wasm
+b297c0a5d8f4cf0b07b59a0e6630d6c4228622404a9b00157b89021d20c4cd4e  vendor/ironrdp-factory.js

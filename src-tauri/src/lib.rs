@@ -3,12 +3,16 @@ mod config;
 mod debug;
 mod dock_menu;
 mod fs;
+mod files;
 mod host;
 mod hotkey;
 mod keychain;
 mod menu;
 mod net;
 mod pty;
+mod process;
+mod rdp;
+use tauri::Manager;
 mod ssh;
 mod sync;
 mod system;
@@ -31,6 +35,10 @@ pub fn run() {
         .manage(clipboard::Clipboard::default())
         .manage(ssh::Ssh::default())
         .manage(net::Net::default())
+        .manage(files::Files::default())
+        .manage(process::Processes::default())
+        .manage(rdp::Proxies::default())
+        .manage(rdp::Drives::default())
         .manage(traffic_lights::TrafficLights::default())
         .register_uri_scheme_protocol("tabbysync", sync::handle)
         .setup(move |app| {
@@ -60,12 +68,49 @@ pub fn run() {
             debug::start(app.handle());
             Ok(())
         })
+        .on_page_load(|webview, payload| {
+            if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
+                webview.state::<process::Processes>().reset(webview.label());
+                webview.state::<files::Files>().reset(webview.label());
+                webview.state::<rdp::Proxies>().reset(webview.label());
+                webview.state::<rdp::Drives>().reset(webview.label());
+            }
+        })
         .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                window.state::<process::Processes>().reset(window.label());
+                window.state::<files::Files>().reset(window.label());
+                window.state::<rdp::Proxies>().reset(window.label());
+                window.state::<rdp::Drives>().reset(window.label());
+            }
             traffic_lights::on_window_event(window, event);
             dock_menu::window_event(window.label(), event);
             debug::on_window_event(window, event);
         })
         .invoke_handler(tauri::generate_handler![
+            rdp::rdp_proxy_start,
+            rdp::rdp_proxy_answer,
+            rdp::rdp_proxy_stats,
+            rdp::rdp_proxy_close,
+            rdp::rdp_drives_open,
+            rdp::rdp_drives_close,
+            rdp::rdp_drive_stat,
+            rdp::rdp_drive_list,
+            rdp::rdp_drive_open,
+            rdp::rdp_drive_read,
+            rdp::rdp_drive_write,
+            rdp::rdp_drive_truncate,
+            rdp::rdp_drive_close,
+            rdp::rdp_drive_mkdir,
+            rdp::rdp_drive_remove,
+            rdp::rdp_drive_rename,
+            rdp::rdp_drive_volume,
+            process::proc_spawn,
+            process::proc_write,
+            process::proc_end_stdin,
+            process::proc_kill,
+            process::proc_release,
+            files::files_call,
             host::host_info,
             host::open_external,
             system::list_fonts,
@@ -85,6 +130,11 @@ pub fn run() {
             traffic_lights::window_set_title,
             traffic_lights::window_traffic_light_frame,
             clipboard::clipboard_read,
+            clipboard::clipboard_files,
+            clipboard::clipboard_write_image,
+            clipboard::clipboard_change_count,
+            clipboard::clipboard_read_items,
+            clipboard::clipboard_write_items,
             clipboard::clipboard_write,
             config::config_read,
             config::config_first_launch,

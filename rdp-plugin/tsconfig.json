@@ -1,0 +1,14 @@
+{
+  "extends": "../tsconfig.json",
+  "exclude": [
+    "node_modules",
+    "dist"
+  ],
+  "compilerOptions": {
+    "baseUrl": "src",
+    "target": "ES2021",
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noImplicitReturns": false
+  }
+}

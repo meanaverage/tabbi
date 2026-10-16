@@ -4,6 +4,12 @@
 
 It's built from an unmodified Tabby checkout plus the parts in this repo, and the app comes out at about 25 MB.
 
+## Remote Desktop
+
+[tabby-rdp](https://github.com/meanaverage/tabby-rdp) is bundled, adapted for Tauri. Create a **Remote desktop (RDP)** profile in Settings → Profiles & connections, or use the desktop controls on an SSH terminal. Settings → Remote Desktop contains accounts, clipboard, shared-folder, audio, and display options. It is updated with the app. See [the integration notes](rdp-plugin/README.md).
+
+iTabby and tabbi build independently; shared changes must be brought into both repositories explicitly.
+
 ## Install
 
 On a Mac, with these installed once:
