@@ -10,6 +10,7 @@ import '../../app/src/preload.scss'
 
 // Required before other imports
 import '../../web/polyfills.buffer'
+import './clipboard'
 
 const modules: Record<string, any> = {}
 
@@ -52,7 +53,9 @@ const TabbyHost = {
         const result: any[] = []
         for (const [i, info] of infos.entries()) {
             progress?.(i, infos.length)
+            TabbyHost.registerModule(`${info.name}/package.json`, info)
             const module = await loadScript(info.url)
+            if (!module.default) { throw new Error(`Could not initialize ${info.name}`) }
             TabbyHost.registerModule(info.name, module)
             TabbyHost.registerModule(`resources/builtin-plugins/${info.name}`, module)
             module.pluginName = info.name

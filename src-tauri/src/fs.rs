@@ -26,6 +26,8 @@ fn expand(path: &str) -> PathBuf {
 #[serde(rename_all = "camelCase")]
 pub struct Stat {
     size: u64,
+    dev: u64,
+    ino: u64,
     mode: u32,
     uid: u32,
     gid: u32,
@@ -50,15 +52,19 @@ pub fn stat(path: &str, lstat: bool) -> Result<Stat, String> {
     let p = expand(path);
     let meta = if lstat { std::fs::symlink_metadata(&p) } else { std::fs::metadata(&p) }
         .map_err(|e| node_error(e, if lstat { "lstat" } else { "stat" }, path))?;
+    Ok(metadata_stat(&meta))
+}
+
+pub fn metadata_stat(meta: &std::fs::Metadata) -> Stat {
     #[cfg(unix)]
-    let (mode, uid, gid) = {
+    let (mode, uid, gid, dev, ino) = {
         use std::os::unix::fs::MetadataExt;
-        (meta.mode(), meta.uid(), meta.gid())
+        (meta.mode(), meta.uid(), meta.gid(), meta.dev(), meta.ino())
     };
     #[cfg(not(unix))]
-    let (mode, uid, gid) = (if meta.is_dir() { 0o40755 } else { 0o100644 }, 0, 0);
-    Ok(Stat {
-        size: meta.len(),
+    let (mode, uid, gid, dev, ino) = (if meta.is_dir() { 0o40755 } else { 0o100644 }, 0, 0, 0, 0);
+    Stat {
+        size: meta.len(), dev, ino,
         mode,
         uid,
         gid,
@@ -69,7 +75,7 @@ pub fn stat(path: &str, lstat: bool) -> Result<Stat, String> {
         is_file: meta.is_file(),
         is_directory: meta.is_dir(),
         is_symlink: meta.file_type().is_symlink(),
-    })
+    }
 }
 
 #[tauri::command]

@@ -1,3 +1,4 @@
+import * as childProcess from './node/child_process'
 import '@angular/compiler'
 // The Node modules plugins `require`, as far as the app needs them: browser ports where they exist, and the rest
 // (fs, os, process…) backed by the Rust side. `window.tabbyTauriHost` is the host_info that entry.ts fetched first.
@@ -46,7 +47,7 @@ register('querystring', {
     parse: (text: string) => Object.fromEntries(new URLSearchParams(text)),
 })
 register('tty', { isatty: () => false })
-register('child_process', {})
+register('child_process', childProcess)
 register('readable-stream', require('stream-browserify'))
 const host = (): any => window['tabbyTauriHost'] ?? {}
 register('os', {
@@ -112,13 +113,16 @@ register('net', nodeNet)
 register('russh', require('russh'))
 register('events', require('events'))
 register('path', require('path-browserify'))
-register('url', { ...require('url'), pathToFileURL: (x: string) => `file://${x}` })
+register('url', { ...require('url'), pathToFileURL: (x: string) => new URL(`file://${x}`), domainToASCII: (x: string) => { try { return new URL(`http://${x}`).hostname } catch { return '' } } })
 register('zlib', { ...require('browserify-zlib'), constants: require('browserify-zlib') })
 register('assert', Object.assign(require('assert'), { assertNotStrictEqual: () => true, notStrictEqual: () => true }))
 register('constants', require('constants-browserify'))
 register('stream', require('stream-browserify'))
 register('readline', { ...require('readline-browserify'), cursorTo: () => null, clearLine: stream => stream.write('\r') })
-register('electron', {})
+register('electron', {
+    clipboard: { filePaths: () => syncCall('clipboard_files') },
+    shell: { showItemInFolder: (path: string) => childProcess.execFile('/usr/bin/open', ['-R', path], (error: any) => { if (error) { console.warn(error) } }) },
+})
 register('@electron/remote', {})
 
 register('@angular/core', require('@angular/core'))

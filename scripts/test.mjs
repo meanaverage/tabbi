@@ -4,6 +4,7 @@
 // inside it, closes it. SSH goes to a throwaway OpenSSH server on 127.0.0.1 with throwaway keys (macOS's own sshd,
 // run as you), stopped at the end.
 //   node scripts/test.mjs [only the checks whose names match this regular expression]
+import rdpChecks from './rdp-checks.mjs'
 import * as fs from 'node:fs'
 import * as net from 'node:net'
 import * as os from 'node:os'
@@ -14,7 +15,15 @@ import { execFileSync, spawn } from 'node:child_process'
 const root = path.resolve(url.fileURLToPath(new URL('.', import.meta.url)), '..')
 // (TABBI_APP: another built tabbi.app to check instead)
 const exe = path.join(process.env.TABBI_APP ?? path.join(root, 'out/tabbi.app'), 'Contents/MacOS/tabbi')
-const port = 9500 + Math.floor(Math.random() * 400)
+// Ask the OS for unused ports instead of colliding with another local test/service.
+async function unusedPort () {
+    const server = net.createServer()
+    await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve) })
+    const chosen = server.address().port
+    await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
+    return chosen
+}
+const port = await unusedPort()
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tabbi-test-'))
 const log = path.join(dataDir, 'app.log')
 const sleep = ms => new Promise(r => setTimeout(r, ms))
@@ -22,7 +31,7 @@ const only = process.argv[2]
 
 // The throwaway SSH server
 const sshDir = path.join(dataDir, 'sshd')
-const sshPort = 42000 + Math.floor(Math.random() * 5000)
+const sshPort = await unusedPort()
 fs.mkdirSync(sshDir)
 for (const name of ['host', 'client']) {
     execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-C', `tabbi-test-${name}`, '-f', path.join(sshDir, name)])
@@ -118,6 +127,7 @@ const prelude = `
 `
 
 const checks = [
+    ...rdpChecks,
     ['Tabby starts with every plugin', `return (window.pluginModules ?? []).length === ${JSON.parse(fs.readFileSync(path.join(root, '.build/page/plugins.json'), 'utf-8')).length}`],
     ['A terminal runs a command', `const t = await open(); return run(t, 'echo tt-$((6*7))', 'tt-42')`],
     ["A quick program's output comes before its exit", `
