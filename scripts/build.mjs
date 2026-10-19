@@ -24,6 +24,8 @@ const TABBY_PLUGINS = [
     'tabby-terminal',
     'tabby-community-color-schemes',
     'tabby-ssh',
+    'tabby-serial',
+    'tabby-telnet',
     'tabby-local',
     'tabby-linkifier',
 ]

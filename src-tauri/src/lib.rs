@@ -9,6 +9,7 @@ mod keychain;
 mod menu;
 mod net;
 mod pty;
+mod serial;
 mod ssh;
 mod sync;
 mod system;
@@ -31,6 +32,7 @@ pub fn run() {
         .manage(clipboard::Clipboard::default())
         .manage(ssh::Ssh::default())
         .manage(net::Net::default())
+        .manage(serial::Serial::default())
         .manage(traffic_lights::TrafficLights::default())
         .register_uri_scheme_protocol("tabbysync", sync::handle)
         .setup(move |app| {
@@ -114,6 +116,18 @@ pub fn run() {
             net::net_listen,
             net::net_close_server,
             net::net_reset,
+            serial::serial_list,
+            serial::serial_open,
+            serial::serial_write,
+            serial::serial_ack,
+            serial::serial_close,
+            serial::serial_update,
+            serial::serial_set,
+            serial::serial_get,
+            serial::serial_get_baud_rate,
+            serial::serial_flush,
+            serial::serial_drain,
+            serial::serial_reset,
             pty::pty_spawn,
             pty::pty_attach,
             pty::pty_write,

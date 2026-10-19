@@ -11,6 +11,7 @@ import * as tauriDpi from '@tauri-apps/api/dpi'
 import * as tauriWebview from '@tauri-apps/api/webview'
 import * as nodeFs from './node/fs'
 import * as nodeNet from './node/net'
+import * as serialport from './node/serialport'
 import * as keytar from './node/keytar'
 import { syncCall } from './node/sync'
 
@@ -105,8 +106,9 @@ register('@luminati-io/socksv5', {
 })
 register('util', require('util/'))
 register('keytar', keytar)
-register('@serialport/bindings', {})
-register('@serialport/bindings-cpp', {})
+// Serial ports (tabby-serial), over the Rust side: node/serialport.ts.
+register('@serialport/bindings', serialport)
+register('@serialport/bindings-cpp', serialport)
 register('net', nodeNet)
 // The npm package's own wrapper, over our stand-in for its native part (node/russh.native.ts, see webpack.config.mjs).
 register('russh', require('russh'))
