@@ -5,7 +5,7 @@
 //! A port's input is read on a thread of its own (the port library's reads block) and goes to the page as raw
 //! frames on a Tauri channel, `[0][bytes]` for data and `[1][JSON]` for the end of input or an error, as the
 //! sockets in net.rs do. Reading pauses while more than MAX_UNACKED bytes are unacknowledged by the page.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -122,6 +122,7 @@ pub struct BaudRate {
 }
 
 struct Port {
+    path: String,
     closed: AtomicBool,
     /// Writes and settings; the reader thread has a clone of the port.
     handle: Mutex<Box<dyn SerialPort>>,
@@ -131,22 +132,68 @@ struct Port {
     baud_rate: Mutex<u32>,
     unacked: Mutex<usize>,
     room: Condvar,
+    /// The reader thread, which holds a copy of the port's descriptor: closing waits for it, so that the port
+    /// (exclusive while any descriptor is open) is free to reopen as soon as the page's close returns.
+    reader: Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 
 impl Port {
     fn close(&self) {
         self.closed.store(true, Ordering::SeqCst);
         self.room.notify_all();
+        let reader = self.reader.lock().unwrap().take();
+        if let Some(reader) = reader {
+            let _ = reader.join();
+        }
     }
 }
 
+/// How long an open waits for a close of the same port to finish (a tab's Reconnect closes and opens right away).
+const CLOSE_WAIT: Duration = Duration::from_secs(3);
+
 #[derive(Default)]
 pub struct Serial {
+    inner: Arc<Inner>,
+}
+
+#[derive(Default)]
+struct Inner {
     next: AtomicU32,
     ports: Mutex<HashMap<u32, Arc<Port>>>,
+    /// Paths whose port is closing: exclusive until its descriptors are gone.
+    closing: Mutex<HashSet<String>>,
+    freed: Condvar,
+}
+
+impl Inner {
+    /// Closes a port, letting an open of the same path through once it's gone.
+    fn close(&self, port: Arc<Port>) {
+        self.closing.lock().unwrap().insert(port.path.clone());
+        port.close();
+        self.closing.lock().unwrap().remove(&port.path);
+        self.freed.notify_all();
+    }
+
+    fn wait_until_free(&self, path: &str) {
+        let deadline = std::time::Instant::now() + CLOSE_WAIT;
+        let mut closing = self.closing.lock().unwrap();
+        while closing.contains(path) {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            if left.is_zero() {
+                return;
+            }
+            closing = self.freed.wait_timeout(closing, left).unwrap().0;
+        }
+    }
 }
 
 impl Serial {
+    fn port(&self, id: u32) -> Result<Arc<Port>, SerialError> {
+        self.inner.port(id)
+    }
+}
+
+impl Inner {
     fn port(&self, id: u32) -> Result<Arc<Port>, SerialError> {
         self.ports
             .lock()
@@ -231,8 +278,16 @@ pub fn serial_list() -> Result<Vec<PortInfo>, SerialError> {
 
 /// Opens the port with the settings given; input goes to `data` from then on.
 #[tauri::command]
-pub fn serial_open(serial: State<'_, Serial>, options: OpenOptions, data: Channel<InvokeResponseBody>) -> Result<OpenedPort, SerialError> {
+pub async fn serial_open(serial: State<'_, Serial>, options: OpenOptions, data: Channel<InvokeResponseBody>) -> Result<OpenedPort, SerialError> {
+    let inner = serial.inner.clone();
+    tauri::async_runtime::spawn_blocking(move || open_port(&inner, options, data))
+        .await
+        .map_err(|e| SerialError::new("EIO", e.to_string()))?
+}
+
+fn open_port(serial: &Inner, options: OpenOptions, data: Channel<InvokeResponseBody>) -> Result<OpenedPort, SerialError> {
     let (data_bits, stop_bits, parity, flow_control) = line_settings(&options)?;
+    serial.wait_until_free(&options.path);
     let build = |baud_rate: u32| {
         serialport::new(&options.path, baud_rate)
             .data_bits(data_bits)
@@ -267,19 +322,23 @@ pub fn serial_open(serial: State<'_, Serial>, options: OpenOptions, data: Channe
     let mut reader = handle.try_clone()?;
     let baud_rate = if pseudo { options.baud_rate } else { handle.baud_rate().unwrap_or(options.baud_rate) };
     let port = Arc::new(Port {
+        path: options.path.clone(),
         closed: AtomicBool::new(false),
         handle: Mutex::new(handle),
         pseudo,
         baud_rate: Mutex::new(baud_rate),
         unacked: Mutex::new(0),
         room: Condvar::new(),
+        reader: Mutex::new(None),
     });
     let id = serial.next.fetch_add(1, Ordering::Relaxed) + 1;
     serial.ports.lock().unwrap().insert(id, port.clone());
 
-    std::thread::Builder::new()
+    let reader_port = port.clone();
+    let thread = std::thread::Builder::new()
         .name(format!("serial-{id}"))
         .spawn(move || {
+            let port = reader_port;
             let mut buf = vec![0u8; READ_CHUNK];
             loop {
                 // Waits while the page is behind.
@@ -317,6 +376,7 @@ pub fn serial_open(serial: State<'_, Serial>, options: OpenOptions, data: Channe
             }
         })
         .map_err(SerialError::from)?;
+    *port.reader.lock().unwrap() = Some(thread);
     Ok(OpenedPort { id, baud_rate })
 }
 
@@ -348,12 +408,15 @@ pub fn serial_ack(serial: State<'_, Serial>, id: u32, length: usize) {
     }
 }
 
+/// Returns once the port is closed for good (its reader thread gone), so it can be opened again right away.
 #[tauri::command]
-pub fn serial_close(serial: State<'_, Serial>, id: u32) {
-    let port = serial.ports.lock().unwrap().remove(&id);
+pub async fn serial_close(serial: State<'_, Serial>, id: u32) -> Result<(), SerialError> {
+    let port = serial.inner.ports.lock().unwrap().remove(&id);
     if let Some(port) = port {
-        port.close();
+        let inner = serial.inner.clone();
+        tauri::async_runtime::spawn_blocking(move || inner.close(port)).await.map_err(|e| SerialError::new("EIO", e.to_string()))?;
     }
+    Ok(())
 }
 
 #[tauri::command]
@@ -424,7 +487,11 @@ pub async fn serial_drain(serial: State<'_, Serial>, id: u32) -> Result<(), Seri
 /// What the page before this one had is gone with it.
 #[tauri::command]
 pub fn serial_reset(serial: State<'_, Serial>) {
-    for (_, port) in serial.ports.lock().unwrap().drain() {
-        port.close();
-    }
+    let inner = serial.inner.clone();
+    let ports: Vec<_> = inner.ports.lock().unwrap().drain().map(|(_, port)| port).collect();
+    std::thread::spawn(move || {
+        for port in ports {
+            inner.close(port);
+        }
+    });
 }

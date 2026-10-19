@@ -247,7 +247,7 @@ const checks = [
         await ready(t)
         await until(() => screen(t).includes('telnet-test-ready'))
         await run(t, 'hello-telnet', 'telnet-echo: hello-telnet')
-        const header = t.element.nativeElement.querySelector('terminal-toolbar strong')?.textContent.trim()
+        const header = t.element.nativeElement.querySelector('terminal-toolbar strong:not([hidden])')?.textContent.trim()
         await zone.run(() => app.closeTab(holder(t), false))
         if (header !== '127.0.0.1:${telnetPort}') throw new Error('Telnet header: ' + header)
         return true`],
@@ -288,10 +288,10 @@ const checks = [
         if (!Array.isArray(ports) || ports.some(p => typeof p.path !== 'string')) throw new Error('Port list: ' + JSON.stringify(ports))
         const opened = await profiles.openNewTabForProfile({ type: 'serial', name: 'test serial', options: { port: ${JSON.stringify(serialPort)}, baudrate: 9600 } })
         const t = opened.getAllTabs ? opened.getAllTabs()[0] : opened
-        await ready(t)
+        await ready(t).catch(() => { throw new Error('The serial tab did not open: ' + JSON.stringify({ session: t.session?.constructor?.name, open: t.session?.open, startupError: t.sessionStartupError, serial: t.session?.serial && { isOpen: t.session.serial.isOpen, opening: t.session.serial.opening }, shown: t.frontend?.xterm ? screen(t).slice(-300) : null })) })
         await run(t, 'hello-serial', 'serial-echo: hello-serial')
         await run(t, 'again', 'serial-echo: again')
-        const header = t.element.nativeElement.querySelector('terminal-toolbar strong')?.textContent.trim()
+        const header = t.element.nativeElement.querySelector('terminal-toolbar strong:not([hidden])')?.textContent.trim()
         await zone.run(() => app.closeTab(holder(t), false))
         if (header !== '${serialPort} (9600)') throw new Error('Serial header: ' + header)
         // The port is free again: it opens a second time.
