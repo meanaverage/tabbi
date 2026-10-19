@@ -31,6 +31,7 @@ On first launch, if you have Tabby installed, tabbi asks whether to bring your T
 - Local terminals, tabs and split panes, in as many windows as you like (⌘N)
 - Tabby's settings, themes and color schemes
 - SSH: passwords, key files, the SSH agent, saved passwords (in the Keychain), SFTP and port forwarding
+- Telnet, and serial connections (USB serial adapters and the like; baud rate and line settings as in Tabby)
 - Moving the window by its tab bar, with the window buttons where Tabby puts them
 - The Mac menu bar, native right-click menus, and your installed fonts in Settings
 - The window keeps its size and position, and can dock to a screen edge with a system-wide show/hide hotkey
@@ -40,12 +41,11 @@ On first launch, if you have Tabby installed, tabbi asks whether to bring your T
 ## Not yet
 
 - Installing plugins, or using plugins installed in Tabby
-- Telnet and serial connections (left out on purpose)
 - Platforms other than macOS (tested on Apple Silicon)
 
 ## How it works
 
-Tabby keeps everything that depends on Electron in one plugin, `tabby-electron`. tabbi replaces it with `tabby-tauri` (in `plugin/`), plus a Rust app (`src-tauri/`) for what Electron and Node did: terminals, files, SSH, network connections, the clipboard and the Keychain. `page/` starts Tabby inside the window.
+Tabby keeps everything that depends on Electron in one plugin, `tabby-electron`. tabbi replaces it with `tabby-tauri` (in `plugin/`), plus a Rust app (`src-tauri/`) for what Electron and Node did: terminals, files, SSH, network connections, serial ports, the clipboard and the Keychain. `page/` starts Tabby inside the window.
 
 `./build` copies the Tabby checkout into `.build/`, adds these parts to the copy, builds it, then builds the app with Tauri. The Tabby checkout itself is never changed.
 

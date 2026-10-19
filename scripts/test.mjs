@@ -20,6 +20,58 @@ const log = path.join(dataDir, 'app.log')
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 const only = process.argv[2]
 
+// A throwaway telnet server: negotiates (so the client speaks the protocol), greets, and echoes each line back.
+const telnetPort = await new Promise((resolve, reject) => { const probe = net.createServer(); probe.once('error', reject); probe.listen(0, '127.0.0.1', () => { const free = probe.address().port; probe.close(() => resolve(free)) }) })
+const telnetServer = net.createServer(socket => {
+    socket.write(Buffer.from([255, 251, 1, 255, 251, 3])) // IAC WILL ECHO, IAC WILL SUPPRESS-GO-AHEAD
+    socket.write('telnet-test-ready\r\n')
+    let pending = ''
+    socket.on('error', () => null)
+    socket.on('data', chunk => {
+        // (without the client's telnet commands: IAC x y, and IAC SB … IAC SE)
+        const bytes = [...chunk], text = []
+        for (let i = 0; i < bytes.length; i++) {
+            if (bytes[i] !== 255) { text.push(bytes[i]); continue }
+            if (bytes[i + 1] === 255) { text.push(255); i++; continue }
+            if (bytes[i + 1] === 250) { const end = bytes.indexOf(240, i + 2); i = end < 0 ? bytes.length : end; continue }
+            i += 2
+        }
+        pending += Buffer.from(text).toString('latin1')
+        let cr
+        while ((cr = pending.indexOf('\r')) >= 0) {
+            const line = pending.slice(0, cr).replace(/\n/g, ''); pending = pending.slice(cr + 1)
+            socket.write(`telnet-echo: ${line}\r\n`)
+        }
+    })
+})
+await new Promise(resolve => telnetServer.listen(telnetPort, '127.0.0.1', resolve))
+
+// A throwaway serial port: one end of a pseudo-terminal pair, echoing each line it gets; the other end's device
+// path is what the app opens, as it would a USB serial adapter's.
+const serialHelper = spawn('/usr/bin/python3', ['-c', `
+import os, pty
+master, slave = pty.openpty()
+print(os.ttyname(slave), flush=True)
+pending = b''
+while True:
+    try:
+        data = os.read(master, 4096)
+    except OSError:
+        break
+    if not data:
+        break
+    pending += data
+    while b'\\r' in pending:
+        line, pending = pending.split(b'\\r', 1)
+        os.write(master, b'serial-echo: ' + line.replace(b'\\n', b'') + b'\\r\\n')
+`], { stdio: ['ignore', 'pipe', 'inherit'] })
+const serialPort = await new Promise((resolve, reject) => {
+    let out = ''
+    serialHelper.stdout.on('data', chunk => { out += chunk; if (out.includes('\n')) { resolve(out.slice(0, out.indexOf('\n')).trim()) } })
+    serialHelper.on('exit', code => reject(new Error(`the serial helper exited with ${code}`)))
+})
+process.on('exit', () => { serialHelper.kill(); telnetServer.close() })
+
 // The throwaway SSH server
 const sshDir = path.join(dataDir, 'sshd')
 const sshPort = 42000 + Math.floor(Math.random() * 5000)
@@ -189,6 +241,66 @@ const checks = [
         await split.splitTab(t, 'r')
         const second = await ready(await until(() => split.getAllTabs().find(x => x !== t)))
         return run(second, 'echo second-pane', 'second-pane')`],
+    ['Telnet: connects, negotiates, and carries a line there and back', `
+        const opened = await window.tabby.get(core.ProfilesService).openNewTabForProfile({ type: 'telnet', name: 'test telnet', options: { host: '127.0.0.1', port: ${telnetPort} } })
+        const t = opened.getAllTabs ? opened.getAllTabs()[0] : opened
+        await ready(t)
+        await until(() => screen(t).includes('telnet-test-ready'))
+        await run(t, 'hello-telnet', 'telnet-echo: hello-telnet')
+        const header = t.element.nativeElement.querySelector('terminal-toolbar strong')?.textContent.trim()
+        await zone.run(() => app.closeTab(holder(t), false))
+        if (header !== '127.0.0.1:${telnetPort}') throw new Error('Telnet header: ' + header)
+        return true`],
+    ['Serial: the port binding opens, writes, reads, changes the baud rate and closes', `
+        const binding = window.require('@serialport/bindings-cpp').autoDetect()
+        let port
+        try {
+            port = await binding.open({ path: ${JSON.stringify(serialPort)}, baudRate: 9600, dataBits: 8, stopBits: 1, parity: 'none', rtscts: false, xon: false, xoff: false, xany: false, lock: true })
+        } catch (e) { throw new Error('open: ' + e.message + ' (' + e.code + ')') }
+        try {
+            if (!port.isOpen || port.openOptions.baudRate !== 9600) throw new Error('state: ' + JSON.stringify({ open: port.isOpen, options: port.openOptions }))
+            await port.write(Buffer.from('ping-binding\\r'))
+            const buffer = Buffer.alloc(64)
+            let text = ''
+            while (!text.includes('serial-echo: ping-binding')) {
+                const { bytesRead } = await port.read(buffer, 0, 64)
+                if (!bytesRead) throw new Error('input ended early: ' + JSON.stringify(text))
+                text += buffer.subarray(0, bytesRead).toString()
+            }
+            await port.update({ baudRate: 115200 })
+            if ((await port.getBaudRate()).baudRate !== 115200) throw new Error('baud rate after update: ' + JSON.stringify(await port.getBaudRate()))
+            await port.set({ dtr: true, rts: true, brk: false })
+            const status = await port.get()
+            if (typeof status.cts !== 'boolean') throw new Error('status: ' + JSON.stringify(status))
+            await port.flush(); await port.drain()
+            const pending = port.read(buffer, 0, 64)
+            await port.close()
+            const outcome = await pending.then(() => 'resolved', e => e.canceled ? 'canceled' : 'rejected: ' + e.message)
+            if (outcome !== 'canceled') throw new Error('a read pending at close: ' + outcome)
+            if (port.isOpen) throw new Error('still open after close')
+            return true
+        } catch (e) { if (port.isOpen) await port.close().catch(() => null); throw e }`],
+    ['Serial: lists ports, opens one, and carries a line there and back', `
+        const profiles = window.tabby.get(core.ProfilesService)
+        const all = await profiles.getProfiles()
+        if (!all.some(p => p.id === 'serial:template')) throw new Error('No serial profile; the types are ' + [...new Set(all.map(p => p.type))].join())
+        const ports = await window.require('@serialport/bindings-cpp').autoDetect().list()
+        if (!Array.isArray(ports) || ports.some(p => typeof p.path !== 'string')) throw new Error('Port list: ' + JSON.stringify(ports))
+        const opened = await profiles.openNewTabForProfile({ type: 'serial', name: 'test serial', options: { port: ${JSON.stringify(serialPort)}, baudrate: 9600 } })
+        const t = opened.getAllTabs ? opened.getAllTabs()[0] : opened
+        await ready(t)
+        await run(t, 'hello-serial', 'serial-echo: hello-serial')
+        await run(t, 'again', 'serial-echo: again')
+        const header = t.element.nativeElement.querySelector('terminal-toolbar strong')?.textContent.trim()
+        await zone.run(() => app.closeTab(holder(t), false))
+        if (header !== '${serialPort} (9600)') throw new Error('Serial header: ' + header)
+        // The port is free again: it opens a second time.
+        const again = await profiles.openNewTabForProfile({ type: 'serial', name: 'test serial', options: { port: ${JSON.stringify(serialPort)}, baudrate: 115200 } })
+        const t2 = again.getAllTabs ? again.getAllTabs()[0] : again
+        await ready(t2)
+        await run(t2, 'third', 'serial-echo: third')
+        await zone.run(() => app.closeTab(holder(t2), false))
+        return true`],
     ['SSH: trust prompt, key login, a command', `
         window.tabby.get(core.ConfigService).store.ssh.verifyHostKeys = true
         const opened = await window.tabby.get(core.ProfilesService).openNewTabForProfile({ type: 'ssh', name: 'test sshd', options: {

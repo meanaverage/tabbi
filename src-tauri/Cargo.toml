@@ -34,6 +34,7 @@ async-http-proxy = { version = "1.2.5", features = ["runtime-tokio"] }
 delegate = "0.13"
 futures = "0.3"
 thiserror = "2"
+serialport = { version = "4.10", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 libproc = "0.14"
